@@ -4,7 +4,7 @@
 static const int ADC_PIN = 36;
 static const float R_REF = 100000.0f;
 static const float V_SUPPLY_MV = 3300.0f;
-static const float ALPHA = 0.2f;
+static const float ALPHA = 0.1f;
 static const unsigned long SAMPLE_INTERVAL = 100;
 
 static float filtered_mv = 0.0f;

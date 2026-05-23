@@ -10,11 +10,11 @@ import serial
 import sounddevice as sd
 
 # Serial
-SERIAL_PORT = "/dev/ttyUSB0"
+SERIAL_PORT = "/dev/ttyUSB1"
 BAUD_RATE = 115200
 
 # Audio
-AUDIO_DEVICE = None  # None = system default; set to int device index if needed
+AUDIO_DEVICE = 4
 SAMPLE_RATE = 44100
 
 # Mapping: filtered millivolts -> frequency
@@ -57,7 +57,7 @@ def _audio_callback(outdata, frames, _time, _status):
 def _mv_to_freq(mv: float) -> float:
     clamped = max(MV_MIN, min(MV_MAX, mv))
     ratio = (clamped - MV_MIN) / (MV_MAX - MV_MIN)
-    return FREQ_MIN + ratio * (FREQ_MAX - FREQ_MIN)
+    return FREQ_MAX - ratio * (FREQ_MAX - FREQ_MIN)
 
 
 def main():
