@@ -23,20 +23,35 @@ MV_MAX = 3150.0
 FREQ_MIN = 200.0
 FREQ_MAX = 800.0
 
-# Shared state: one-element float array for lock-free access from audio thread
-_freq = array.array("f", [FREQ_MIN])
+# Shared state: one-element float arrays for lock-free access from audio thread
+_target_freq = array.array("f", [FREQ_MIN])
+_current_freq = array.array("f", [FREQ_MIN])
 _phase = array.array("f", [0.0])
+
+# Smoothing: per-sample interpolation toward target frequency
+# At 44100 Hz, 0.001 gives ~10ms glide time
+FREQ_SMOOTHING = 0.001
 
 
 def _audio_callback(outdata, frames, _time, _status):
-    freq = _freq[0]
+    target = _target_freq[0]
+    freq = _current_freq[0]
     phase = _phase[0]
-    t = np.arange(frames, dtype=np.float32) / SAMPLE_RATE
-    samples = np.sin(2.0 * np.pi * freq * t + phase, dtype=np.float32)
-    phase += 2.0 * np.pi * freq * frames / SAMPLE_RATE
-    phase %= 2.0 * np.pi
-    _phase[0] = phase
-    outdata[:, 0] = samples
+
+    # Build per-sample frequency array via exponential smoothing
+    alpha = FREQ_SMOOTHING
+    # After n samples: freq_n = target + (freq_0 - target) * (1 - alpha)^n
+    decay = (1.0 - alpha) ** np.arange(frames, dtype=np.float64)
+    freqs = target + (freq - target) * decay
+
+    # Accumulate phase from per-sample frequencies
+    phase_increments = 2.0 * np.pi * freqs / SAMPLE_RATE
+    phases = phase + np.cumsum(phase_increments)
+
+    outdata[:, 0] = np.sin(phases).astype(np.float32)
+
+    _current_freq[0] = freqs[-1]
+    _phase[0] = phases[-1] % (2.0 * np.pi)
 
 
 def _mv_to_freq(mv: float) -> float:
@@ -70,7 +85,7 @@ def main():
             except (ValueError, IndexError):
                 continue
             freq = _mv_to_freq(filtered_mv)
-            _freq[0] = freq
+            _target_freq[0] = freq
     except KeyboardInterrupt:
         pass
     finally:
