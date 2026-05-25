@@ -1,0 +1,22 @@
+idf_component_register(
+    SRCS
+        "nvs_config.c"
+        "excitation.c"
+        "adc_read.c"
+        "sync.c"
+        "tdm.c"
+        "sensing_task.c"
+        "network_task.c"
+        "main.c"
+    INCLUDE_DIRS "."
+    REQUIRES
+        nvs_flash
+        driver
+        esp_wifi
+        esp_netif
+        esp_event
+        lwip
+        esp_timer
+        esp_rom
+        tinyosc
+)
