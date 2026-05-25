@@ -1,5 +1,84 @@
 #include "adc_read.h"
 
+#ifdef USE_INTERNAL_ADC
+/* ---- ESP32-S3 internal oneshot ADC ---- */
+
+#include "esp_adc/adc_oneshot.h"
+#include "esp_log.h"
+
+static const char *TAG = "adc_read";
+
+#define INTERNAL_ADC_CHANNEL  ADC_CHANNEL_0   /* GPIO 1 on ESP32-S3 */
+
+static adc_oneshot_unit_handle_t s_adc = NULL;
+
+esp_err_t adc_init(void)
+{
+    adc_oneshot_unit_init_cfg_t unit_cfg = {
+        .unit_id = ADC_UNIT_1,
+    };
+    esp_err_t err = adc_oneshot_new_unit(&unit_cfg, &s_adc);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "adc_oneshot_new_unit failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    adc_oneshot_chan_cfg_t chan_cfg = {
+        .atten   = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_12,
+    };
+    err = adc_oneshot_config_channel(s_adc, INTERNAL_ADC_CHANNEL, &chan_cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "adc_oneshot_config_channel failed: %s", esp_err_to_name(err));
+        adc_oneshot_del_unit(s_adc);
+        s_adc = NULL;
+        return err;
+    }
+
+    ESP_LOGI(TAG, "Internal ADC1 initialised: channel=%d (12-bit, 12 dB atten)",
+             INTERNAL_ADC_CHANNEL);
+    return ESP_OK;
+}
+
+void adc_acquire(void)
+{
+    /* No bus to lock for internal ADC. */
+}
+
+uint16_t adc_read_sample(void)
+{
+    int raw = 0;
+    esp_err_t err = adc_oneshot_read(s_adc, INTERNAL_ADC_CHANNEL, &raw);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "adc_oneshot_read failed: %s", esp_err_to_name(err));
+        return 0;
+    }
+    return (uint16_t)raw;
+}
+
+bool adc_read_into_buffer(uint16_t *buf, int count)
+{
+    int raw = 0;
+    for (int i = 0; i < count; i++) {
+        esp_err_t err = adc_oneshot_read(s_adc, INTERNAL_ADC_CHANNEL, &raw);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "adc_oneshot_read failed at sample %d: %s",
+                     i, esp_err_to_name(err));
+            return false;
+        }
+        buf[i] = (uint16_t)raw;
+    }
+    return true;
+}
+
+void adc_release(void)
+{
+    /* No bus to release for internal ADC. */
+}
+
+#else  /* !USE_INTERNAL_ADC */
+/* ---- MCP3201 external SPI ADC ---- */
+
 #include <string.h>
 #include <stdbool.h>
 #include "driver/spi_master.h"
@@ -126,3 +205,5 @@ void adc_release(void)
 {
     spi_device_release_bus(s_spi);
 }
+
+#endif /* USE_INTERNAL_ADC */
