@@ -125,6 +125,7 @@ void app_main(void)
         double sum = 0.0;
         double sum_sq = 0.0;
         int total_samples = 0;
+        int chan_hist[16] = {0};
 
         for (int r = 0; r < READS_PER_WINDOW; r++) {
             size_t bytes_read = 0;
@@ -137,6 +138,7 @@ void app_main(void)
 
             int n_samples = (int)(bytes_read / sizeof(uint16_t));
             for (int i = 0; i < n_samples; i++) {
+                chan_hist[dma_buf[i] >> 12]++;
                 uint16_t val = dma_buf[i] & 0x0FFF;
                 sum += val;
                 sum_sq += (double)val * val;
@@ -175,7 +177,7 @@ void app_main(void)
         }
 
         float pct = (baseline > 0) ? 100.0f * (baseline - sd) / baseline : 0;
-        printf("sd=%.0f base=%.0f delta=%.1f%% %s\n",
-               sd, baseline, pct, now_touched ? "TOUCH" : "");
+        printf("sd=%.0f mean=%.0f base=%.0f delta=%.1f%% %s\n",
+               sd, mean, baseline, pct, now_touched ? "TOUCH" : "");
     }
 }
