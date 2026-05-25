@@ -125,6 +125,30 @@ Additional options:
 | `--rate HZ` | `100` | Packets per second |
 | `--scenario NAME` | `default` | Named arc to play (automatic mode) |
 
+## Live Controls GUI
+
+`sc/controls.scd` opens a GUI panel for tweaking synth parameters in real time. It is intended for sound design iteration and is not part of the production boot sequence.
+
+Load it after startup completes (after "Shrine startup complete." appears) by executing at the `sc3>` prompt. Loading before startup finishes will open the window without errors, but moving a slider will produce `DoesNotUnderstand` errors because `~synths` has not been populated yet.
+
+```supercollider
+thisProcess.interpreter.executeFile("/path/to/shrine/sc/controls.scd");
+```
+
+The panel opens a window titled "Shrine Controls" with 21 EZSliders across three sections:
+
+**Pad Voices** — `trigRateMin`, `trigRateMax`, `grainDurIdle`, `grainDurFull`, `filterLo`, `filterHi`, `filterRq`, `gsrDrift`, `posSpeedMin`, `posSpeedMax`
+
+**Collective Voice** — `baseFreqMin`, `baseFreqMax`, `collFilterLo`, `collFilterHi`, `gsrActiveThreshold`
+
+**Output Mixer** — `collMixMin`, `collMixMax`, `revMixMin`, `revMixMax`, `reverbDamp`, `reverbRoom`
+
+Each slider calls `.set()` on the running synths; changes take effect immediately. All sliders initialize to the SynthDef defaults, so the starting state matches the engine running without the panel.
+
+Three buttons at the bottom open the scope, meter, and node tree views.
+
+Closing the window does not affect the synths. Run the simulator (`uv run python osc-sim/generator.py --manual` or the automatic arc) so there is audio to hear while adjusting parameters.
+
 ## Verifying OSC Data Without Audio
 
 To confirm OSC data is arriving and reaching the control buses, poll a bus

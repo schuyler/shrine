@@ -64,7 +64,10 @@ s.sync;
 SynthDef(\output_mixer, {
     arg padIn, collectiveIn, out = 0,
         gsrMagBuses,
-        reverbRoom = 0.7, amp = 1.0;
+        reverbRoom = 0.7, amp = 1.0,
+        collMixMin = 0.1, collMixMax = 0.6,
+        revMixMin = 0.05, revMixMax = 0.4,
+        reverbDamp = 0.5;
 
     var pad = In.ar(padIn);
     var coll = In.ar(collectiveIn);
@@ -73,16 +76,16 @@ SynthDef(\output_mixer, {
     var avgGsr = In.kr(gsrMagBuses, 6).mean;
 
     // GSR drives collective mix: low GSR = mostly pad, high GSR = blend
-    var collectiveMix = avgGsr.linlin(0, 1, 0.1, 0.6);
+    var collectiveMix = avgGsr.linlin(0, 1, collMixMin, collMixMax);
 
     // GSR also drives reverb send: more collective activity = more space
-    var reverbMix = avgGsr.linlin(0, 1, 0.05, 0.4);
+    var reverbMix = avgGsr.linlin(0, 1, revMixMin, revMixMax);
 
     // Mix pad voice with collective
     var mixed = pad + (coll * collectiveMix);
 
     // Simple reverb (FreeVerb is built-in, no sc3-plugins needed)
-    var reverbed = FreeVerb.ar(mixed, reverbMix, reverbRoom, 0.5);
+    var reverbed = FreeVerb.ar(mixed, reverbMix, reverbRoom, reverbDamp);
 
     // Soft limiter to prevent clipping
     var limited = reverbed.tanh;

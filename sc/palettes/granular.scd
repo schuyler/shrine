@@ -12,7 +12,12 @@
 
 SynthDef(\pad_voice, {
     arg out = 0, capBus, gsrBus1, gsrBus2, gsrBus3,
-        bufnum, gate = 1, amp = 0.3;
+        bufnum, gate = 1, amp = 0.3,
+        trigRateMin = 1, trigRateMax = 40,
+        grainDurIdle = 0.3, grainDurFull = 0.05,
+        filterLo = 300, filterHi = 8000, filterRq = 0.7,
+        gsrDrift = 0.1,
+        posSpeedMin = 0.1, posSpeedMax = 2;
 
     var cap = In.kr(capBus);        // 0.0-1.0
     var gsr1 = In.kr(gsrBus1);
@@ -22,18 +27,18 @@ SynthDef(\pad_voice, {
     // --- Grain parameters mapped from cap ---
 
     // Grain trigger rate: 1-40 Hz, exponential mapping for perceptual evenness
-    var trigRate = cap.linexp(0, 1, 1, 40);
+    var trigRate = cap.linexp(0, 1, trigRateMin, trigRateMax);
     var trig = Impulse.ar(trigRate);
 
-    // Grain duration: 0.05-0.3 seconds (longer grains at low touch for spaciousness)
-    var grainDur = cap.linlin(0, 1, 0.3, 0.05);
+    // Grain duration: idle=0.3s (spacious), full=0.05s (dense)
+    var grainDur = cap.linlin(0, 1, grainDurIdle, grainDurFull);
 
     // Playback rate: centered at 1.0, GSR introduces slight pitch drift
     var gsrSum = (gsr1 + gsr2 + gsr3) / 3;
-    var rate = 1.0 + (gsrSum * LFNoise1.kr(0.5).range(-0.1, 0.1));
+    var rate = 1.0 + (gsrSum * LFNoise1.kr(0.5).range(gsrDrift.neg, gsrDrift));
 
     // Buffer position: slow random walk, speed increases with touch
-    var posSpeed = cap.linlin(0, 1, 0.1, 2);
+    var posSpeed = cap.linlin(0, 1, posSpeedMin, posSpeedMax);
     var pos = LFNoise1.kr(posSpeed).range(0, 1);
 
     // Amplitude envelope: cap controls overall level
@@ -52,7 +57,7 @@ SynthDef(\pad_voice, {
     );
 
     // Filter cutoff mapped from cap — low touch = dark, full touch = bright
-    var filtered = RLPF.ar(sig, cap.linexp(0, 1, 300, 8000), 0.7);
+    var filtered = RLPF.ar(sig, cap.linexp(0, 1, filterLo, filterHi), filterRq);
 
     // Gate envelope for clean startup/shutdown
     var env = EnvGen.kr(Env.asr(0.1, 1, 0.5), gate, doneAction: 2);
@@ -61,7 +66,10 @@ SynthDef(\pad_voice, {
 }).add;
 
 SynthDef(\collective_voice, {
-    arg out = 0, gsrMagBuses, gsrPhaseBuses, amp = 0.15;
+    arg out = 0, gsrMagBuses, gsrPhaseBuses, amp = 0.15,
+        baseFreqMin = 40, baseFreqMax = 120,
+        collFilterLo = 200, collFilterHi = 4000,
+        gsrActiveThreshold = 0.1;
 
     var mags = In.kr(gsrMagBuses, 6);     // 6 GSR magnitudes
     var phases = In.kr(gsrPhaseBuses, 6);  // 6 GSR phases
@@ -70,7 +78,7 @@ SynthDef(\collective_voice, {
     var activity = mags.mean;
 
     // Count of "active" connections (magnitude > 0.1)
-    var activeCount = (mags > 0.1).sum;
+    var activeCount = (mags > gsrActiveThreshold).sum;
 
     // Phase coherence: how similar are the phases?
     // Low variance = high coherence = more tonal result
@@ -79,7 +87,7 @@ SynthDef(\collective_voice, {
     var coherence = phaseVar.linlin(0, 2, 1, 0).clip(0, 1);
 
     // Base frequency: low drone, modulated by activity
-    var baseFreq = activity.linexp(0, 1, 40, 120);
+    var baseFreq = activity.linexp(0, 1, baseFreqMin, baseFreqMax);
 
     // Harmonic richness: more active connections = more harmonics
     var numHarmonics = activeCount.linlin(0, 6, 1, 6).round;
@@ -99,7 +107,7 @@ SynthDef(\collective_voice, {
     var level = activity.sqrt * amp;
 
     // Coherence controls filter brightness
-    var filtered = LPF.ar(sig, coherence.linexp(0, 1, 200, 4000));
+    var filtered = LPF.ar(sig, coherence.linexp(0, 1, collFilterLo, collFilterHi));
 
     Out.ar(out, filtered * level);
 }).add;
