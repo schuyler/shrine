@@ -6,5 +6,6 @@ dependencies = [
     "numpy",
     "platformio",
     "pyserial",
+    "python-osc",
     "sounddevice",
 ]
