@@ -13,10 +13,19 @@ Usage:
 import argparse
 import curses
 import math
+import socket
 import sys
 import time
 
 from pythonosc.udp_client import SimpleUDPClient
+
+
+class BroadcastUDPClient(SimpleUDPClient):
+    """UDP client with SO_BROADCAST for sending to broadcast addresses."""
+
+    def __init__(self, address: str, port: int):
+        super().__init__(address, port)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
 # GSR pairs: all unique combinations of pads 1-4
 GSR_PAIRS = [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)]
@@ -260,15 +269,15 @@ def build_channels() -> dict:
     return channels
 
 
-def send_osc(client: SimpleUDPClient, channels: dict, t: float) -> dict:
-    """Send all OSC messages for the current tick.
+def send_osc(clients: list, channels: dict, t: float) -> dict:
+    """Send all OSC messages for the current tick to all clients.
 
     Callers must call channel.update(t) for all channels before invoking this
     function. send_osc reads .current (post-noise value computed by update())
     rather than calling update() itself, to avoid double-updating channels.
 
     Args:
-        client: OSC UDP client.
+        clients: List of OSC UDP clients to send to.
         channels: Dict of channel keys to SignalChannel instances.
         t: Current time in seconds (used to compute noise-inclusive values).
 
@@ -279,7 +288,8 @@ def send_osc(client: SimpleUDPClient, channels: dict, t: float) -> dict:
 
     for i in range(1, 5):
         val = max(0.0, min(1.0, channels[("cap", i)].current + layered_noise(t, channels[("cap", i)].noise_offset)))
-        client.send_message(f"/pad/{i}/cap", float(val))
+        for client in clients:
+            client.send_message(f"/pad/{i}/cap", float(val))
         sent[f"/pad/{i}/cap"] = val
 
     for pair in GSR_PAIRS:
@@ -288,8 +298,9 @@ def send_osc(client: SimpleUDPClient, channels: dict, t: float) -> dict:
         raw_phase = max(0.0, min(1.0, channels[("gsr_phase", pair)].current + layered_noise(t, channels[("gsr_phase", pair)].noise_offset)))
         phase_rad = raw_phase * math.pi * 2.0
 
-        client.send_message(f"/gsr/{i}/{j}", float(mag))
-        client.send_message(f"/gsr/{i}/{j}/phase", float(phase_rad))
+        for client in clients:
+            client.send_message(f"/gsr/{i}/{j}", float(mag))
+            client.send_message(f"/gsr/{i}/{j}/phase", float(phase_rad))
         sent[f"/gsr/{i}/{j}"] = mag
         sent[f"/gsr/{i}/{j}/phase"] = phase_rad
 
@@ -315,12 +326,11 @@ def print_summary(sent: dict, scenario: ArcScenario, t: float):
     )
 
 
-def run(host: str, port: int, rate: float, scenario_name: str):
+def run(clients: list, rate: float, scenario_name: str):
     """Main simulation loop.
 
     Args:
-        host: OSC target hostname or IP.
-        port: OSC target port.
+        clients: List of OSC UDP clients to send to.
         rate: Message send rate in Hz.
         scenario_name: Name of the scenario to run.
     """
@@ -328,7 +338,6 @@ def run(host: str, port: int, rate: float, scenario_name: str):
         print(f"Unknown scenario: {scenario_name!r}. Only 'arc' is supported.")
         sys.exit(1)
 
-    client = SimpleUDPClient(host, port)
     channels = build_channels()
     scenario = ArcScenario()
 
@@ -336,7 +345,8 @@ def run(host: str, port: int, rate: float, scenario_name: str):
     start = time.monotonic()
     last = start
 
-    print(f"Sending OSC to {host}:{port} at {rate} Hz. Ctrl-C to stop.")
+    targets_str = ", ".join(f"{c._address}:{c._port}" for c in clients)
+    print(f"Sending OSC to {targets_str} at {rate} Hz. Ctrl-C to stop.")
 
     try:
         while True:
@@ -353,7 +363,7 @@ def run(host: str, port: int, rate: float, scenario_name: str):
             for ch in channels.values():
                 ch.update(t)
 
-            sent = send_osc(client, channels, t)
+            sent = send_osc(clients, channels, t)
             print_summary(sent, scenario, t)
 
             elapsed = time.monotonic() - now
@@ -383,15 +393,14 @@ BAR_HEIGHT = 16  # Number of rows in the slider bar
 STEP = 0.05       # Value change per keypress
 
 
-def _draw_tui(stdscr, channels: dict, selected: int, host: str, port: int):
+def _draw_tui(stdscr, channels: dict, selected: int, targets_str: str):
     """Render the full TUI frame.
 
     Args:
         stdscr: curses window.
         channels: Dict of channel keys to SignalChannel instances.
         selected: Index of the currently selected channel.
-        host: OSC target host (for header display).
-        port: OSC target port (for header display).
+        targets_str: Formatted string of all OSC targets (for header display).
     """
     stdscr.erase()
     max_rows, max_cols = stdscr.getmaxyx()
@@ -400,7 +409,7 @@ def _draw_tui(stdscr, channels: dict, selected: int, host: str, port: int):
     col_width = 7  # characters per channel column
 
     # Header
-    header = f"OSC -> {host}:{port}  |  arrows: navigate/adjust  |  0: zero  f: fill  q: quit"
+    header = f"OSC -> {targets_str}  |  arrows: navigate/adjust  |  0: zero  f: fill  q: quit"
     try:
         stdscr.addstr(0, 0, header[:max_cols - 1], curses.A_BOLD)
     except curses.error:
@@ -457,25 +466,24 @@ def _draw_tui(stdscr, channels: dict, selected: int, host: str, port: int):
     stdscr.refresh()
 
 
-def _manual_loop(stdscr, host: str, port: int, rate: float):
+def _manual_loop(stdscr, clients: list, rate: float):
     """Inner curses loop for manual mode.
 
     Args:
         stdscr: curses window provided by curses.wrapper.
-        host: OSC target host.
-        port: OSC target port.
+        clients: List of OSC UDP clients to send to.
         rate: OSC send rate in Hz.
     """
     curses.curs_set(0)
     stdscr.nodelay(True)
     curses.noecho()
 
-    client = SimpleUDPClient(host, port)
     channels = build_channels()
 
     # Manual mode: only cap and gsr_mag channels are user-controlled.
     # gsr_phase channels exist in the channels dict but are left at 0.
 
+    targets_str = ", ".join(f"{c._address}:{c._port}" for c in clients)
     selected = 0
     n_channels = len(MANUAL_CHANNELS)
     tick = 1.0 / rate
@@ -517,10 +525,10 @@ def _manual_loop(stdscr, host: str, port: int, rate: float):
             channels[key_ch].update(t)
 
         # Send OSC
-        send_osc(client, channels, t)
+        send_osc(clients, channels, t)
 
         # Draw
-        _draw_tui(stdscr, channels, selected, host, port)
+        _draw_tui(stdscr, channels, selected, targets_str)
 
         # Sleep for remaining tick time
         elapsed = time.monotonic() - now
@@ -529,15 +537,14 @@ def _manual_loop(stdscr, host: str, port: int, rate: float):
             time.sleep(sleep_time)
 
 
-def run_manual_mode(host: str, port: int, rate: float):
+def run_manual_mode(clients: list, rate: float):
     """Entry point for manual TUI mode.
 
     Args:
-        host: OSC target host.
-        port: OSC target port.
+        clients: List of OSC UDP clients to send to.
         rate: OSC send rate in Hz.
     """
-    curses.wrapper(_manual_loop, host, port, rate)
+    curses.wrapper(_manual_loop, clients, rate)
 
 
 def main():
@@ -559,13 +566,28 @@ def main():
         default="arc",
         help="Named scenario to run (default: arc)",
     )
+    parser.add_argument(
+        "--targets",
+        nargs="+",
+        metavar="HOST:PORT",
+        help="Send to multiple targets (e.g., 255.255.255.255:57120 255.255.255.255:9000). "
+             "Overrides --host/--port. Uses broadcast UDP.",
+    )
     args = parser.parse_args()
 
+    if args.targets:
+        clients = []
+        for target in args.targets:
+            host, port_str = target.rsplit(":", 1)
+            clients.append(BroadcastUDPClient(host, int(port_str)))
+    else:
+        clients = [SimpleUDPClient(args.host, args.port)]
+
     if args.manual:
-        run_manual_mode(args.host, args.port, args.rate)
+        run_manual_mode(clients, args.rate)
         sys.exit(0)
 
-    run(args.host, args.port, args.rate, args.scenario)
+    run(clients, args.rate, args.scenario)
 
 
 if __name__ == "__main__":

@@ -7,5 +7,7 @@ dependencies = [
     "platformio",
     "pyserial",
     "python-osc",
+    "pyyaml",
+    "requests",
     "sounddevice",
 ]
