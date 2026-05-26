@@ -28,9 +28,22 @@ static const tdm_slot_t s_schedule[TDM_SLOTS] = {
     /* slot 9 */ { .tx_node = 2, .rx_node = 3, .is_gsr = true  },
 };
 
-const tdm_slot_t *tdm_get_schedule(void)
+/* 2-slot standalone schedule: self-cap + loopback GSR, both on node 0 */
+#define TDM_STANDALONE_SLOTS 2
+
+static const tdm_slot_t s_schedule_standalone[TDM_STANDALONE_SLOTS] = {
+    /* slot 0 */ { .tx_node = 0, .rx_node = 0, .is_gsr = false },
+    /* slot 1 */ { .tx_node = 0, .rx_node = 0, .is_gsr = true  },
+};
+
+int tdm_get_slot_count(bool standalone)
 {
-    return s_schedule;
+    return standalone ? TDM_STANDALONE_SLOTS : TDM_SLOTS;
+}
+
+const tdm_slot_t *tdm_get_schedule(bool standalone)
+{
+    return standalone ? s_schedule_standalone : s_schedule;
 }
 
 /* -------------------------------------------------------------------------
@@ -50,13 +63,19 @@ const tdm_slot_t *tdm_get_schedule(void)
 
 static int8_t s_slot_to_gsr_index[TDM_SLOTS];
 
-void tdm_init_gsr_mapping(uint8_t node_id)
+void tdm_init_gsr_mapping(uint8_t node_id, const tdm_slot_t *schedule,
+                           int n_slots)
 {
+    if (n_slots > TDM_SLOTS) {
+        ESP_LOGW(TAG, "n_slots %d exceeds TDM_SLOTS, clamping", n_slots);
+        n_slots = TDM_SLOTS;
+    }
+
     memset(s_slot_to_gsr_index, -1, sizeof(s_slot_to_gsr_index));
 
     int8_t result_idx = 0;
-    for (int i = 0; i < TDM_SLOTS; i++) {
-        if (s_schedule[i].is_gsr && s_schedule[i].rx_node == node_id) {
+    for (int i = 0; i < n_slots; i++) {
+        if (schedule[i].is_gsr && schedule[i].rx_node == node_id) {
             s_slot_to_gsr_index[i] = result_idx++;
         }
     }

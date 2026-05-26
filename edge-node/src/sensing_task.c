@@ -80,9 +80,13 @@ void sensing_task(void *param)
     uint32_t sample_rate = calibrate_sample_rate(&excit_freq);
 
     /* --- Startup: precompute GSR mapping -------------------------------- */
-    tdm_init_gsr_mapping(cfg->node_id);
+    const tdm_slot_t *schedule = tdm_get_schedule(cfg->standalone);
+    int n_slots = tdm_get_slot_count(cfg->standalone);
+    tdm_init_gsr_mapping(cfg->node_id, schedule, n_slots);
 
-    const tdm_slot_t *schedule = tdm_get_schedule();
+    if (cfg->standalone) {
+        ESP_LOGI(TAG, "standalone mode: %d slots", n_slots);
+    }
 
     /* Buffer large enough for one slot's worth of samples.
      * At ~100 kHz sample rate and 750 µs integration window: ~75 samples.
@@ -103,9 +107,9 @@ void sensing_task(void *param)
         scan_result_t result = { 0 };
 
         /* ---------------------------------------------------------------- */
-        /* Iterate over all 10 TDM slots                                    */
+        /* Iterate over all TDM slots                                       */
         /* ---------------------------------------------------------------- */
-        for (int slot = 0; slot < TDM_SLOTS; slot++) {
+        for (int slot = 0; slot < n_slots; slot++) {
             const tdm_slot_t *s = &schedule[slot];
 
             bool am_tx = (s->tx_node == cfg->node_id);

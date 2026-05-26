@@ -20,6 +20,10 @@ build/
 .vscode/launch.json
 .vscode/ipch/
 
+# Test binaries
+edge-node/test/test_tdm
+edge-node/test/test_tinyosc
+
 # OS
 .DS_Store
 Thumbs.db

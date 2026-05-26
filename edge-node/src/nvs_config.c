@@ -41,6 +41,19 @@ esp_err_t nvs_config_load(node_config_t *config)
     }
     config->is_leader = (leader_u8 != 0);
 
+    /* standalone (optional — defaults to false) */
+    uint8_t standalone_u8 = 0;
+    err = nvs_get_u8(handle, "standalone", &standalone_u8);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        config->standalone = false;
+        err = ESP_OK;  /* not an error — key is optional */
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "read standalone: %s", esp_err_to_name(err));
+        goto done;
+    } else {
+        config->standalone = (standalone_u8 != 0);
+    }
+
     /* wifi_ssid */
     err = nvs_get_str(handle, "wifi_ssid", config->wifi_ssid, &ssid_len);
     if (err != ESP_OK) {
@@ -69,8 +82,8 @@ esp_err_t nvs_config_load(node_config_t *config)
         goto done;
     }
 
-    ESP_LOGI(TAG, "config loaded: node_id=%u leader=%d ssid=%s osc=%s:%u",
-             config->node_id, config->is_leader,
+    ESP_LOGI(TAG, "config loaded: node_id=%u leader=%d standalone=%d ssid=%s osc=%s:%u",
+             config->node_id, config->is_leader, config->standalone,
              config->wifi_ssid, config->osc_host, config->osc_port);
 
 done:

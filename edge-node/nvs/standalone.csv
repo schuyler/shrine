@@ -1,0 +1,9 @@
+key,type,encoding,value
+namespace,namespace,,shrine
+node_id,data,u8,0
+leader,data,u8,1
+standalone,data,u8,1
+wifi_ssid,data,string,shrine-net
+wifi_pass,data,string,secretpass
+osc_host,data,string,192.168.4.255
+osc_port,data,u16,57120

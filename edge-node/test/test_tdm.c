@@ -36,7 +36,7 @@
 /* Slots 0-3: self-cap, tx_node == rx_node == slot_index, is_gsr == false */
 static void test_self_cap_slots(void)
 {
-    const tdm_slot_t *sched = tdm_get_schedule();
+    const tdm_slot_t *sched = tdm_get_schedule(false);
 
     for (int i = 0; i < 4; i++) {
         TEST_ASSERT_INT_EQ((int)sched[i].tx_node, i);
@@ -48,7 +48,7 @@ static void test_self_cap_slots(void)
 /* Slots 4-9: GSR pairs with correct (tx, rx) values and is_gsr == true */
 static void test_gsr_slots(void)
 {
-    const tdm_slot_t *sched = tdm_get_schedule();
+    const tdm_slot_t *sched = tdm_get_schedule(false);
 
     /* Expected (tx, rx) for slots 4-9 */
     static const uint8_t expected_tx[6] = { 0, 0, 0, 1, 1, 2 };
@@ -65,7 +65,7 @@ static void test_gsr_slots(void)
 /* All TX and RX values must be in range 0-3 */
 static void test_slot_node_ids_in_range(void)
 {
-    const tdm_slot_t *sched = tdm_get_schedule();
+    const tdm_slot_t *sched = tdm_get_schedule(false);
 
     for (int i = 0; i < TDM_SLOTS; i++) {
         TEST_ASSERT(sched[i].tx_node <= 3);
@@ -83,7 +83,7 @@ static void test_slot_node_ids_in_range(void)
  */
 static void test_gsr_mapping_node0(void)
 {
-    tdm_init_gsr_mapping(0);
+    tdm_init_gsr_mapping(0, tdm_get_schedule(false), TDM_SLOTS);
 
     /* self-cap slots */
     for (int i = 0; i < 4; i++) {
@@ -102,7 +102,7 @@ static void test_gsr_mapping_node0(void)
  */
 static void test_gsr_mapping_node1(void)
 {
-    tdm_init_gsr_mapping(1);
+    tdm_init_gsr_mapping(1, tdm_get_schedule(false), TDM_SLOTS);
 
     /* self-cap slots */
     for (int i = 0; i < 4; i++) {
@@ -126,7 +126,7 @@ static void test_gsr_mapping_node1(void)
  */
 static void test_gsr_mapping_node2(void)
 {
-    tdm_init_gsr_mapping(2);
+    tdm_init_gsr_mapping(2, tdm_get_schedule(false), TDM_SLOTS);
 
     /* self-cap slots */
     for (int i = 0; i < 4; i++) {
@@ -152,7 +152,7 @@ static void test_gsr_mapping_node2(void)
  */
 static void test_gsr_mapping_node3(void)
 {
-    tdm_init_gsr_mapping(3);
+    tdm_init_gsr_mapping(3, tdm_get_schedule(false), TDM_SLOTS);
 
     /* self-cap slots */
     for (int i = 0; i < 4; i++) {
@@ -179,11 +179,51 @@ static void test_gsr_mapping_node3(void)
 static void test_self_cap_slots_always_minus1(void)
 {
     for (uint8_t node = 0; node < 4; node++) {
-        tdm_init_gsr_mapping(node);
+        tdm_init_gsr_mapping(node, tdm_get_schedule(false), TDM_SLOTS);
         for (int slot = 0; slot < 4; slot++) {
             TEST_ASSERT_INT_EQ(tdm_gsr_result_index((uint8_t)slot), -1);
         }
     }
+}
+
+/* =========================================================================
+ * Standalone schedule tests
+ * ========================================================================= */
+
+/* Standalone schedule: 2 slots */
+static void test_standalone_slot_count(void)
+{
+    TEST_ASSERT_INT_EQ(tdm_get_slot_count(true), 2);
+    TEST_ASSERT_INT_EQ(tdm_get_slot_count(false), TDM_SLOTS);
+}
+
+/* Standalone slot 0: self-cap (tx=0, rx=0, is_gsr=false) */
+/* Standalone slot 1: loopback GSR (tx=0, rx=0, is_gsr=true) */
+static void test_standalone_schedule(void)
+{
+    const tdm_slot_t *sched = tdm_get_schedule(true);
+
+    TEST_ASSERT_INT_EQ((int)sched[0].tx_node, 0);
+    TEST_ASSERT_INT_EQ((int)sched[0].rx_node, 0);
+    TEST_ASSERT(sched[0].is_gsr == false);
+
+    TEST_ASSERT_INT_EQ((int)sched[1].tx_node, 0);
+    TEST_ASSERT_INT_EQ((int)sched[1].rx_node, 0);
+    TEST_ASSERT(sched[1].is_gsr == true);
+}
+
+/* In standalone mode, node 0 has 1 GSR RX slot (slot 1) → gsr_result[0] */
+static void test_gsr_mapping_standalone_node0(void)
+{
+    const tdm_slot_t *sched = tdm_get_schedule(true);
+    int n_slots = tdm_get_slot_count(true);
+    tdm_init_gsr_mapping(0, sched, n_slots);
+
+    /* slot 0: self-cap, not GSR → -1 */
+    TEST_ASSERT_INT_EQ(tdm_gsr_result_index(0), -1);
+
+    /* slot 1: loopback GSR, node 0 is RX → gsr_result[0] */
+    TEST_ASSERT_INT_EQ(tdm_gsr_result_index(1), 0);
 }
 
 /* =========================================================================
@@ -342,6 +382,11 @@ int main(void)
     RUN_TEST(test_gsr_mapping_node2);
     RUN_TEST(test_gsr_mapping_node3);
     RUN_TEST(test_self_cap_slots_always_minus1);
+
+    /* Standalone */
+    RUN_TEST(test_standalone_slot_count);
+    RUN_TEST(test_standalone_schedule);
+    RUN_TEST(test_gsr_mapping_standalone_node0);
 
     /* I/Q demodulation */
     RUN_TEST(test_demod_dc_input);

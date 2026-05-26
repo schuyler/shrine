@@ -43,6 +43,9 @@ void app_main(void)
     ESP_LOGI(TAG, "node_id=%u, leader=%d, ssid=%s, osc=%s:%u",
              s_config.node_id, s_config.is_leader,
              s_config.wifi_ssid, s_config.osc_host, s_config.osc_port);
+    if (s_config.standalone) {
+        ESP_LOGI(TAG, "standalone mode enabled");
+    }
 
     /* 3. Excitation driver */
     ESP_ERROR_CHECK(excitation_init());

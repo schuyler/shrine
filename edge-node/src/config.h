@@ -51,6 +51,7 @@
 typedef struct {
     uint8_t  node_id;
     bool     is_leader;
+    bool     standalone;
     char     wifi_ssid[33];
     char     wifi_pass[65];
     char     osc_host[16];
