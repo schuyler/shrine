@@ -33,7 +33,7 @@ static const char *TAG = "cap-demo";
  * is detected, and freezes during touch.  Touch is detected when stdev
  * drops below baseline by more than TOUCH_THRESHOLD_PCT percent.
  */
-#define ALPHA_SLOW        0.02f
+#define ALPHA_SLOW        0.1f
 #define ALPHA_INIT        0.2f
 #define INIT_SAMPLES      50
 #define TOUCH_THRESHOLD_PCT  5.0f
