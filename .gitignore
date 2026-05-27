@@ -27,3 +27,6 @@ edge-node/test/test_tinyosc
 # OS
 .DS_Store
 Thumbs.db
+
+# Audio samples -- don't check these into Git (at least not yet)
+sc/samples/
