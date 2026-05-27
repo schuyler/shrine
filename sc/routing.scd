@@ -53,12 +53,35 @@ s.sync;
     ], ~groups[\sources]);
 });
 
-// --- Instantiate collective voice ---
-~synths[\collective] = Synth(\collective_voice, [
-    \out, ~buses[\collectiveAudio].index,
-    \gsrMagBuses, ~buses[\gsrMag].index,
-    \gsrPhaseBuses, ~buses[\gsrPhase].index,
-], ~groups[\sources]);
+// --- Instantiate pair voices ---
+// One per GSR pair. Each writes to both pads' collective audio buses.
+~config[\padPairs] = [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]];
+~synths[\pairVoices] = ~config[\padPairs].collect({ |pair, gsrIdx|
+    Synth(\pair_voice, [
+        \out1, ~buses[\collectiveAudio][pair[0]].index,
+        \out2, ~buses[\collectiveAudio][pair[1]].index,
+        \gsrMagBus, ~buses[\gsrMag].index + gsrIdx,
+    ], ~groups[\sources]);
+});
+
+// --- Instantiate triad voices ---
+// One per triad of pads. Each writes to all three pads' collective audio buses.
+~config[\padTriads] = [[0,1,2],[0,1,3],[0,2,3],[1,2,3]];
+~config[\triadGsrIndices] = [[0,1,3],[0,2,4],[1,2,5],[3,4,5]];
+~synths[\triadVoices] = ~config[\padTriads].collect({ |triad, idx|
+    var gsrIdx = ~config[\triadGsrIndices][idx];
+    Synth(\triad_voice, [
+        \out1, ~buses[\collectiveAudio][triad[0]].index,
+        \out2, ~buses[\collectiveAudio][triad[1]].index,
+        \out3, ~buses[\collectiveAudio][triad[2]].index,
+        \gsrMagBus1, ~buses[\gsrMag].index + gsrIdx[0],
+        \gsrMagBus2, ~buses[\gsrMag].index + gsrIdx[1],
+        \gsrMagBus3, ~buses[\gsrMag].index + gsrIdx[2],
+        \gsrPhaseBus1, ~buses[\gsrPhase].index + gsrIdx[0],
+        \gsrPhaseBus2, ~buses[\gsrPhase].index + gsrIdx[1],
+        \gsrPhaseBus3, ~buses[\gsrPhase].index + gsrIdx[2],
+    ], ~groups[\sources]);
+});
 
 // --- Output mixer SynthDef (infrastructure, not palette) ---
 SynthDef(\output_mixer, {
@@ -98,10 +121,19 @@ s.sync;
 ~synths[\outputMixers] = 4.collect({ |i|
     Synth(\output_mixer, [
         \padIn, ~buses[\padAudio][i].index,
-        \collectiveIn, ~buses[\collectiveAudio].index,
+        \collectiveIn, ~buses[\collectiveAudio][i].index,
         \out, i,  // hardware output channel 0-3
         \gsrMagBuses, ~buses[\gsrMag].index,
     ], ~groups[\effects]);
 });
 
-"Routing complete. 4 pad voices + 1 collective voice + 4 output mixers.".postln;
+// --- Stereo downmix (for 2-channel hardware) ---
+// Sums channels 2-3 into channels 0-1 so all four pad voices are
+// audible on stereo speakers. Harmless on 4-channel hardware.
+SynthDef(\stereo_downmix, {
+    Out.ar(0, In.ar(2, 2));  // additively mix ch2→ch0 and ch3→ch1
+}).add;
+s.sync;
+~synths[\downmix] = Synth(\stereo_downmix, target: ~groups[\effects], addAction: \addToTail);
+
+"Routing complete. 4 pad voices + 6 pair voices + 4 triad voices + 4 output mixers.".postln;

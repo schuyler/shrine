@@ -242,8 +242,11 @@ class ArcScenario:
         return ARC_PHASES[self.phase_index]["name"]
 
 
-def build_channels() -> dict:
+def build_channels(smoothing_rate: float = 0.02) -> dict:
     """Construct all SignalChannel instances with decorrelated noise offsets.
+
+    Args:
+        smoothing_rate: Per-tick interpolation rate toward target (0-1).
 
     Returns:
         Dict mapping channel keys to SignalChannel objects.
@@ -253,12 +256,12 @@ def build_channels() -> dict:
     offset_step = 1.1  # Incommensurate offset to decorrelate channels
 
     for i in range(1, 5):
-        channels[("cap", i)] = SignalChannel(smoothing_rate=0.02, noise_offset=offset)
+        channels[("cap", i)] = SignalChannel(smoothing_rate=smoothing_rate, noise_offset=offset)
         offset += offset_step
 
     for pair in GSR_PAIRS:
         channels[("gsr_mag", pair)] = SignalChannel(
-            smoothing_rate=0.015, noise_offset=offset
+            smoothing_rate=smoothing_rate, noise_offset=offset
         )
         offset += offset_step
         channels[("gsr_phase", pair)] = SignalChannel(
@@ -269,7 +272,7 @@ def build_channels() -> dict:
     return channels
 
 
-def send_osc(clients: list, channels: dict, t: float) -> dict:
+def send_osc(clients: list, channels: dict, t: float, noise: bool = True) -> dict:
     """Send all OSC messages for the current tick to all clients.
 
     Callers must call channel.update(t) for all channels before invoking this
@@ -280,22 +283,29 @@ def send_osc(clients: list, channels: dict, t: float) -> dict:
         clients: List of OSC UDP clients to send to.
         channels: Dict of channel keys to SignalChannel instances.
         t: Current time in seconds (used to compute noise-inclusive values).
+        noise: If True, add organic noise on top of channel values.
 
     Returns:
         Dict mapping OSC address strings to the float values that were sent.
     """
     sent = {}
 
+    def _val(key):
+        v = channels[key].current
+        if noise:
+            v += layered_noise(t, channels[key].noise_offset)
+        return max(0.0, min(1.0, v))
+
     for i in range(1, 5):
-        val = max(0.0, min(1.0, channels[("cap", i)].current + layered_noise(t, channels[("cap", i)].noise_offset)))
+        val = _val(("cap", i))
         for client in clients:
             client.send_message(f"/pad/{i}/cap", float(val))
         sent[f"/pad/{i}/cap"] = val
 
     for pair in GSR_PAIRS:
         i, j = pair
-        mag = max(0.0, min(1.0, channels[("gsr_mag", pair)].current + layered_noise(t, channels[("gsr_mag", pair)].noise_offset)))
-        raw_phase = max(0.0, min(1.0, channels[("gsr_phase", pair)].current + layered_noise(t, channels[("gsr_phase", pair)].noise_offset)))
+        mag = _val(("gsr_mag", pair))
+        raw_phase = _val(("gsr_phase", pair))
         phase_rad = raw_phase * math.pi * 2.0
 
         for client in clients:
@@ -415,11 +425,22 @@ def _draw_tui(stdscr, channels: dict, selected: int, targets_str: str):
     except curses.error:
         pass
 
-    # Vertical layout: row 1 = value, rows 2..BAR_HEIGHT+1 = bar, row BAR_HEIGHT+2 = label
-    value_row = 2
-    bar_top = 3
+    # Vertical layout: row 1 = group labels, row 2 = value, rows 3..BAR_HEIGHT+2 = bar, row BAR_HEIGHT+3 = label
+    group_row = 1
+    value_row = 3
+    bar_top = 4
     bar_bottom = bar_top + BAR_HEIGHT - 1
     label_row = bar_bottom + 1
+
+    # Group labels spanning the cap and gsr columns
+    n_cap = 4
+    cap_span = n_cap * col_width
+    gsr_span = (n_channels - n_cap) * col_width
+    try:
+        stdscr.addstr(group_row, 0, "Capacitance".center(cap_span)[:cap_span], curses.A_UNDERLINE)
+        stdscr.addstr(group_row, cap_span, "GSR Magnitude".center(gsr_span)[:gsr_span], curses.A_UNDERLINE)
+    except curses.error:
+        pass
 
     for idx, key in enumerate(MANUAL_CHANNELS):
         col = idx * col_width
@@ -478,7 +499,7 @@ def _manual_loop(stdscr, clients: list, rate: float):
     stdscr.nodelay(True)
     curses.noecho()
 
-    channels = build_channels()
+    channels = build_channels(smoothing_rate=0.15)
 
     # Manual mode: only cap and gsr_mag channels are user-controlled.
     # gsr_phase channels exist in the channels dict but are left at 0.
@@ -524,8 +545,8 @@ def _manual_loop(stdscr, clients: list, rate: float):
         for key_ch in MANUAL_CHANNELS:
             channels[key_ch].update(t)
 
-        # Send OSC
-        send_osc(clients, channels, t)
+        # Send OSC (no organic noise in manual mode)
+        send_osc(clients, channels, t, noise=False)
 
         # Draw
         _draw_tui(stdscr, channels, selected, targets_str)

@@ -27,7 +27,7 @@
 //   msg[5..7] = gsr_phase[0..2]
 //
 // Edge nodes send phase as atan2(Q,I) in -pi..pi. Normalize to 0..2pi
-// so downstream code (collective_voice) sees a consistent range.
+// so downstream code (pair/triad voices, output_mixer) sees a consistent range.
 4.do({ |nodeId|
     OSCdef(("edgeNode" ++ nodeId).asSymbol, { |msg|
         var mapping = ~config[\nodeGsrMapping][nodeId];

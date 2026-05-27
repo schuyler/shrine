@@ -24,6 +24,32 @@ or create a symlink:
 ln -s /Applications/SuperCollider.app/Contents/MacOS/sclang /usr/local/bin/sclang
 ```
 
+#### Class library path fix (macOS)
+
+On some macOS installations (observed with SC 3.14.1 via Homebrew cask),
+`sclang` looks for the class library in `Contents/MacOS/SCClassLibrary` but
+the files are actually in `Contents/Resources/SCClassLibrary`. The symptom is:
+
+```
+ERROR: There is a discrepancy.
+numClassDeps 0   gNumClasses 82
+ERROR: Library has not been compiled successfully.
+```
+
+Fix by creating `~/Library/Application Support/SuperCollider/sclang_conf.yaml`
+with an explicit `includePaths` entry:
+
+```yaml
+includePaths:
+  - /Applications/SuperCollider.app/Contents/Resources/SCClassLibrary
+```
+
+You may also need to clear the macOS quarantine flag after installing:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/SuperCollider.app
+```
+
 ### sox
 
 ```sh
@@ -48,14 +74,16 @@ the engine:
 
 ```sh
 mkdir -p sc/samples
-for i in 1 2 3 4; do
-    sox -n -r 48000 -c 1 sc/samples/pad${i}.wav synth 10 sine $((200 + i * 100)) fade 0.5 10 0.5
-done
+sox -n -r 48000 -c 1 sc/samples/pad1.wav synth 10 sine 220.00 fade 0.5 10 0.5
+sox -n -r 48000 -c 1 sc/samples/pad2.wav synth 10 sine 261.63 fade 0.5 10 0.5
+sox -n -r 48000 -c 1 sc/samples/pad3.wav synth 10 sine 293.66 fade 0.5 10 0.5
+sox -n -r 48000 -c 1 sc/samples/pad4.wav synth 10 sine 329.63 fade 0.5 10 0.5
 ```
 
-This produces 10-second sine tones at 300, 400, 500, and 600 Hz, each with a
-0.5-second fade in and out. The different frequencies make it easy to identify
-which pad is sounding.
+This produces 10-second sine tones on an A minor pentatonic scale (A3, C4, D4,
+E4), each with a 0.5-second fade in and out. The different pitches make it easy
+to identify which pad is sounding, and the pentatonic intervals ensure the pads
+sound harmonically compatible when played together.
 
 ## Running the Sound Engine
 
@@ -127,27 +155,81 @@ Additional options:
 
 ## Live Controls GUI
 
-`sc/controls.scd` opens a GUI panel for tweaking synth parameters in real time. It is intended for sound design iteration and is not part of the production boot sequence.
+`sc/controls.scd` opens a GUI panel for tweaking synth parameters in real
+time. It is intended for sound design iteration and is not part of the
+production boot sequence.
 
-Load it after startup completes (after "Shrine startup complete." appears) by executing at the `sc3>` prompt. Loading before startup finishes will open the window without errors, but moving a slider will produce `DoesNotUnderstand` errors because `~synths` has not been populated yet.
+### Loading the panel
+
+The controls panel requires the `sc3>` REPL prompt. Run `sclang` with no
+arguments, then execute `startup.scd` and `controls.scd` in sequence:
+
+```supercollider
+thisProcess.interpreter.executeFile("/path/to/shrine/sc/startup.scd");
+```
+
+Wait for "Shrine startup complete." to appear, then:
 
 ```supercollider
 thisProcess.interpreter.executeFile("/path/to/shrine/sc/controls.scd");
 ```
 
-The panel opens a window titled "Shrine Controls" with 21 EZSliders across three sections:
+Loading `controls.scd` before startup finishes will open the window without
+errors, but moving a slider will produce `DoesNotUnderstand` errors because
+`~synths` has not been populated yet.
 
-**Pad Voices** — `trigRateMin`, `trigRateMax`, `grainDurIdle`, `grainDurFull`, `filterLo`, `filterHi`, `filterRq`, `gsrDrift`, `posSpeedMin`, `posSpeedMax`
+### What the controls do
 
-**Collective Voice** — `baseFreqMin`, `baseFreqMax`, `collFilterLo`, `collFilterHi`, `gsrActiveThreshold`
+The panel has 21 sliders across three sections. Each slider calls `.set()` on
+the running synths; changes take effect immediately. All sliders initialize to
+the SynthDef defaults.
 
-**Output Mixer** — `collMixMin`, `collMixMax`, `revMixMin`, `revMixMax`, `reverbDamp`, `reverbRoom`
+**Pad Voices** — controls the granular synthesis engine for each pad. These
+parameters shape how capacitive touch maps to sound.
 
-Each slider calls `.set()` on the running synths; changes take effect immediately. All sliders initialize to the SynthDef defaults, so the starting state matches the engine running without the panel.
+| Slider | Default | Effect |
+|--------|---------|--------|
+| trigRateMin | 1 Hz | Grain trigger rate at zero touch (sparse) |
+| trigRateMax | 40 Hz | Grain trigger rate at full touch (dense) |
+| grainDurIdle | 0.3 s | Grain length at low touch (tonal) |
+| grainDurFull | 0.05 s | Grain length at full touch (textural) |
+| filterLo | 300 Hz | Low-pass cutoff at zero touch (dark) |
+| filterHi | 8000 Hz | Low-pass cutoff at full touch (bright) |
+| filterRq | 0.7 | Filter resonance — lower = sharper peak |
+| gsrDrift | 0.1 | Pitch drift from neighboring GSR (±10%) |
+| posSpeedMin | 0.1 Hz | Buffer scan speed at low touch |
+| posSpeedMax | 2 Hz | Buffer scan speed at full touch |
+
+**Collective Voices** — controls the additive sine clusters that emerge from
+GSR connections between pads. There are 6 pair voices (one per pair of pads)
+and 4 triad voices (one per combination of three pads). These sliders set the
+same parameters on all 10 collective voices simultaneously.
+
+| Slider | Default | Effect |
+|--------|---------|--------|
+| baseFreqMin | 40 Hz | Fundamental frequency at zero GSR |
+| baseFreqMax | 120 Hz | Fundamental frequency at max GSR |
+| collFilterLo | 200 Hz | Low-pass cutoff when phases are incoherent |
+| collFilterHi | 4000 Hz | Low-pass cutoff when phases are coherent |
+| gsrActiveThreshold | 0.1 | GSR below this counts as inactive |
+
+**Output Mixer** — controls how each pad's output channel blends its granular
+voice with the collective voices routed to it, plus reverb.
+
+| Slider | Default | Effect |
+|--------|---------|--------|
+| collMixMin | 0.1 | Collective blend at low GSR |
+| collMixMax | 0.6 | Collective blend at high GSR |
+| revMixMin | 0.05 | Reverb wet/dry at low GSR |
+| revMixMax | 0.4 | Reverb wet/dry at high GSR |
+| reverbDamp | 0.5 | High-frequency damping in reverb tail |
+| reverbRoom | 0.7 | Reverb room size (longer decay) |
 
 Three buttons at the bottom open the scope, meter, and node tree views.
 
-Closing the window does not affect the synths. Run the simulator (`uv run python osc-sim/generator.py --manual` or the automatic arc) so there is audio to hear while adjusting parameters.
+Closing the window does not affect the synths. Run the simulator
+(`uv run python osc-sim/generator.py --manual` or the automatic arc) so there
+is audio to hear while adjusting parameters.
 
 ## Verifying OSC Data Without Audio
 

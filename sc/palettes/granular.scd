@@ -5,7 +5,11 @@
 //   - GSR (average of 3 neighbors) introduces subtle pitch drift
 //   - No touch = silence. Full touch = dense, bright grains.
 //
-// \collective_voice — one total. Additive sine cluster driven by collective GSR state.
+// \pair_voice — driven by 1 GSR pair. Additive sine cluster, 2 harmonics max.
+//   - GSR magnitude controls base frequency and amplitude
+//   - Coherence fixed at 1.0 (single pair, no meaningful phase comparison)
+//
+// \triad_voice — driven by 3 GSR pairs. Additive sine cluster, 3 harmonics max.
 //   - GSR magnitude mean controls base frequency and amplitude
 //   - Count of active GSR connections controls harmonic richness
 //   - GSR phase coherence controls filter brightness
@@ -65,51 +69,96 @@ SynthDef(\pad_voice, {
     Out.ar(out, filtered * grainAmp * env);
 }).add;
 
-SynthDef(\collective_voice, {
-    arg out = 0, gsrMagBuses, gsrPhaseBuses, amp = 0.15,
+SynthDef(\pair_voice, {
+    arg out1, out2, gsrMagBus, amp = 0.03,
         baseFreqMin = 40, baseFreqMax = 120,
         collFilterLo = 200, collFilterHi = 4000,
         gsrActiveThreshold = 0.1;
 
-    var mags = In.kr(gsrMagBuses, 6);     // 6 GSR magnitudes
-    var phases = In.kr(gsrPhaseBuses, 6);  // 6 GSR phases
+    // Single GSR pair: one magnitude, one phase
+    var activity = In.kr(gsrMagBus);   // 0-1
 
-    // Overall GSR activity: mean of all 6 magnitudes
-    var activity = mags.mean;
+    // 0 or 1 — UGen-level comparison, not language-level .if()
+    var activeCount = (activity > gsrActiveThreshold);
 
-    // Count of "active" connections (magnitude > 0.1)
-    var activeCount = (mags > gsrActiveThreshold).sum;
+    // Single pair gives no meaningful phase comparison; fix coherence fully on
+    var coherence = 1.0;
 
-    // Phase coherence: how similar are the phases?
-    // Low variance = high coherence = more tonal result
-    var phaseMean = phases.mean;
-    var phaseVar = ((phases - phaseMean).squared).mean;
-    var coherence = phaseVar.linlin(0, 2, 1, 0).clip(0, 1);
-
-    // Base frequency: low drone, modulated by activity
+    // Base frequency driven by activity
     var baseFreq = activity.linexp(0, 1, baseFreqMin, baseFreqMax);
 
-    // Harmonic richness: more active connections = more harmonics
-    var numHarmonics = activeCount.linlin(0, 6, 1, 6).round;
+    // 1 harmonic when inactive, 2 when active
+    var numHarmonics = activeCount.linlin(0, 1, 1, 2).round;
 
-    // Build additive sine cluster.
-    // Lag.kr smooths the on/off transition of each harmonic over 100ms,
-    // preventing clicks when numHarmonics crosses an integer boundary.
-    var sig = Mix.fill(6, { |i|
-        // (i < numHarmonics) produces a BinaryOpUGen that outputs 1.0 or 0.0.
-        // Do NOT use .if() here — that's language-level, not UGen-level.
+    // Additive sine cluster, 2 harmonics max.
+    // Lag.kr smooths the on/off transition over 100ms, preventing clicks.
+    // (i < numHarmonics) is a BinaryOpUGen — do NOT use .if() here.
+    var sig = Mix.fill(2, { |i|
         var harmonicAmp = Lag.kr((i < numHarmonics) * 1, 0.1);
         var freq = baseFreq * (i + 1) * (1 + (LFNoise1.kr(0.3).range(-0.005, 0.005)));
         SinOsc.ar(freq) * harmonicAmp / (i + 1)
     });
 
-    // Apply amplitude: activity controls overall level
+    var level = activity.sqrt * amp;
+
+    // coherence is fixed at 1.0, so filter always uses collFilterHi
+    var filtered = LPF.ar(sig, coherence.linexp(0, 1, collFilterLo, collFilterHi));
+
+    Out.ar(out1, filtered * level);
+    Out.ar(out2, filtered * level);
+}).add;
+
+SynthDef(\triad_voice, {
+    arg out1, out2, out3,
+        gsrMagBus1, gsrMagBus2, gsrMagBus3,
+        gsrPhaseBus1, gsrPhaseBus2, gsrPhaseBus3,
+        amp = 0.02,
+        baseFreqMin = 40, baseFreqMax = 120,
+        collFilterLo = 200, collFilterHi = 4000,
+        gsrActiveThreshold = 0.1;
+
+    // Read 3 magnitudes and 3 phases individually (buses may not be consecutive)
+    var mag1 = In.kr(gsrMagBus1);
+    var mag2 = In.kr(gsrMagBus2);
+    var mag3 = In.kr(gsrMagBus3);
+    var phase1 = In.kr(gsrPhaseBus1);
+    var phase2 = In.kr(gsrPhaseBus2);
+    var phase3 = In.kr(gsrPhaseBus3);
+
+    // Overall GSR activity: mean of 3 magnitudes
+    var activity = (mag1 + mag2 + mag3) / 3;
+
+    // Count of "active" connections (magnitude > threshold)
+    var activeCount = (mag1 > gsrActiveThreshold) + (mag2 > gsrActiveThreshold) + (mag3 > gsrActiveThreshold);
+
+    // Phase coherence: low variance = high coherence = more tonal / brighter
+    var phaseMean = (phase1 + phase2 + phase3) / 3;
+    var phaseVar = (((phase1 - phaseMean).squared) + ((phase2 - phaseMean).squared) + ((phase3 - phaseMean).squared)) / 3;
+    var coherence = phaseVar.linlin(0, 2, 1, 0).clip(0, 1);
+
+    // Base frequency driven by activity
+    var baseFreq = activity.linexp(0, 1, baseFreqMin, baseFreqMax);
+
+    // 1–3 harmonics mapped from active connection count
+    var numHarmonics = activeCount.linlin(0, 3, 1, 3).round;
+
+    // Additive sine cluster, 3 harmonics max.
+    // Lag.kr smooths on/off transitions over 100ms.
+    // (i < numHarmonics) is a BinaryOpUGen — do NOT use .if() here.
+    var sig = Mix.fill(3, { |i|
+        var harmonicAmp = Lag.kr((i < numHarmonics) * 1, 0.1);
+        var freq = baseFreq * (i + 1) * (1 + (LFNoise1.kr(0.3).range(-0.005, 0.005)));
+        SinOsc.ar(freq) * harmonicAmp / (i + 1)
+    });
+
     var level = activity.sqrt * amp;
 
     // Coherence controls filter brightness
     var filtered = LPF.ar(sig, coherence.linexp(0, 1, collFilterLo, collFilterHi));
 
-    Out.ar(out, filtered * level);
+    Out.ar(out1, filtered * level);
+    Out.ar(out2, filtered * level);
+    Out.ar(out3, filtered * level);
 }).add;
 
-"Granular palette loaded (\\pad_voice, \\collective_voice).".postln;
+"Granular palette loaded (\\pad_voice, \\pair_voice, \\triad_voice).".postln;

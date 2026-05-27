@@ -5,7 +5,7 @@
 
 // 6 consecutive GSR magnitude buses (one multichannel allocation).
 // Individual pair: ~buses[\gsrMag].index + pairIndex
-// Consecutive allocation is REQUIRED for In.kr(gsrMagBuses, 6) in collective_voice.
+// Consecutive allocation is REQUIRED for In.kr(gsrMagBuses, 6) in output_mixer.
 ~buses[\gsrMag] = Bus.control(s, 6);
 
 // 6 consecutive GSR phase buses
@@ -15,8 +15,10 @@
 // 4 mono audio buses, one per pad voice → its output channel
 ~buses[\padAudio] = 4.collect({ Bus.audio(s, 1) });
 
-// 1 mono audio bus for the collective voice
-~buses[\collectiveAudio] = Bus.audio(s, 1);
+// 4 mono audio buses for per-pad collective voice summing.
+// Each pad's output mixer reads its own collective bus.
+// Pair and triad voices write (sum) into the relevant pads' buses.
+~buses[\collectiveAudio] = 4.collect({ Bus.audio(s, 1) });
 
 "Buses allocated.".postln;
 ~buses[\cap].do({ |b, i| ("  cap[" ++ i ++ "] = bus " ++ b.index).postln });
