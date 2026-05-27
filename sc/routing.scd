@@ -45,7 +45,7 @@ s.sync;
     var gsrIdx = ~config[\padGsrIndices][i];
     Synth(\pad_voice, [
         \out, ~buses[\padAudio][i].index,
-        \capBus, ~buses[\cap][i].index,
+        \capBus, ~buses[\cap].index + i,
         \gsrBus1, ~buses[\gsrMag].index + gsrIdx[0],
         \gsrBus2, ~buses[\gsrMag].index + gsrIdx[1],
         \gsrBus3, ~buses[\gsrMag].index + gsrIdx[2],

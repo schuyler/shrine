@@ -1,7 +1,9 @@
 ~buses = IdentityDictionary.new;
 
-// 4 capacitive touch buses (one per pad), 0-indexed
-~buses[\cap] = 4.collect({ Bus.control(s, 1) });
+// 4 consecutive capacitive touch buses (one per pad), 0-indexed.
+// Consecutive allocation is REQUIRED for \c_setn in the flush timer.
+// Individual pad: ~buses[\cap].index + padIndex
+~buses[\cap] = Bus.control(s, 4);
 
 // 6 consecutive GSR magnitude buses (one multichannel allocation).
 // Individual pair: ~buses[\gsrMag].index + pairIndex
@@ -21,6 +23,6 @@
 ~buses[\collectiveAudio] = 4.collect({ Bus.audio(s, 1) });
 
 "Buses allocated.".postln;
-~buses[\cap].do({ |b, i| ("  cap[" ++ i ++ "] = bus " ++ b.index).postln });
+4.do({ |i| ("  cap[" ++ i ++ "] = bus " ++ (~buses[\cap].index + i)).postln });
 ("  gsrMag base = bus " ++ ~buses[\gsrMag].index ++ " (6 consecutive)").postln;
 ("  gsrPhase base = bus " ++ ~buses[\gsrPhase].index ++ " (6 consecutive)").postln;
