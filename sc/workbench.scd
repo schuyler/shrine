@@ -1,0 +1,619 @@
+// Shrine — Sound Design Workbench
+//
+// Standalone texture explorer. Does NOT depend on startup.scd, buses.scd,
+// osc-input.scd, or any other Shrine engine file. Boots its own server
+// and is fully self-contained.
+//
+// HOW TO USE:
+//   1. Open this file in the SuperCollider IDE.
+//   2. Select all (Cmd-A) and evaluate (Shift-Enter or Cmd-Return).
+//   3. Wait for the GUI window to appear — the server boot takes a moment.
+//   4. Pick a source (Sample / Granular / Oscillator / Noise).
+//   5. Adjust effect stages with their bypass toggles and sliders.
+//   6. Use "Load Sample" to replace the default sample (sc/samples/pad1.wav).
+//
+// SIGNAL CHAIN:
+//   Ndef(\source) → Ndef(\fx_filter) → Ndef(\fx_chorus)
+//                → Ndef(\fx_phaser) → Ndef(\fx_reverb) → hardware out
+//
+// Each effect Ndef reads Ndef(\previous).ar directly.
+// Bypass (1 = pass-through, 0 = active) uses Select.ar so switching is
+// click-free and no rebuilding of the Ndef graph is required.
+(
+// ------------------------------------------------------------------
+// All var declarations must precede executable code in SC.
+// ------------------------------------------------------------------
+var s, buf, samplePath, w;
+
+// State variables (language-side; Ndefs read via .set)
+var sourceMode    = 0;     // 0=Sample, 1=Granular, 2=Oscillator, 3=Noise
+
+// Sample / Granular
+var sampleRate    = 1.0;
+var sampleLoop    = 1;
+var grainDensity  = 10.0;
+var grainDur      = 0.1;
+var grainPosSpeed = 0.5;
+var grainPitch    = 1.0;
+
+// Oscillator
+var oscWave       = 0;     // 0=sine, 1=saw, 2=square, 3=tri
+var oscFreq       = 220.0;
+var oscVibRate    = 5.0;
+var oscVibDepth   = 0.0;
+
+// Noise
+var noiseType     = 0;     // 0=white, 1=pink, 2=brown
+
+// Filter
+var fxFilterBypass  = 1;
+var filterType      = 0;   // 0=LP, 1=HP, 2=BP
+var filterCutoff    = 1000.0;
+var filterRq        = 0.7;
+
+// Chorus
+var fxChorusBypass  = 1;
+var chorusRate      = 1.0;
+var chorusDepth     = 0.003;
+var chorusMix       = 0.5;
+
+// Phaser
+var fxPhaserBypass  = 1;
+var phaserRate      = 0.5;
+var phaserFeedback  = 0.6;
+var phaserMix       = 0.5;
+
+// Reverb
+var fxReverbBypass  = 1;
+var reverbRoom      = 0.6;
+var reverbDamp      = 0.5;
+var reverbMix       = 0.3;
+
+// Output
+var masterAmp     = 0.4;
+
+// Helpers
+var sectionLabel = { |parent, text|
+    var lbl = StaticText(parent, Rect(0, 0, 560, 22));
+    lbl.string = text;
+    lbl.font = Font.default.copy.bold_(true).size_(13);
+    lbl.stringColor = Color.white;
+    lbl;
+};
+
+var makeSlider = { |parent, label, spec, initVal, action|
+    var ez = EZSlider(parent, 560@26, label, spec, action, initVal,
+        unitWidth: 0, labelWidth: 160);
+    ez.labelView.stringColor = Color.white;
+    ez.numberView.stringColor = Color.white;
+    ez.numberView.normalColor = Color.white;
+    ez.numberView.typingColor = Color.cyan;
+    ez.numberView.background = Color.gray(0.25);
+    ez;
+};
+
+var makeBypassButton = { |parent, label, initBypass, action|
+    // States: [bypassed (grey), active (green)]
+    var btn = Button(parent, 120@26)
+        .states_([
+            [label ++ " [bypass]", Color.black, Color.gray(0.6)],
+            [label ++ " [ON]",     Color.black, Color(0.2, 0.8, 0.3)]
+        ])
+        .value_(if(initBypass == 1, { 0 }, { 1 }))
+        .action_(action);
+    btn;
+};
+
+// ------------------------------------------------------------------
+// Server setup
+// ------------------------------------------------------------------
+s = Server.default;
+s.options.numOutputBusChannels = 2;
+s.options.numInputBusChannels  = 0;
+
+// ------------------------------------------------------------------
+// Boot sequence
+// ------------------------------------------------------------------
+s.waitForBoot({
+    Routine({
+        var base = PathName(thisProcess.nowExecutingPath).pathOnly;
+        samplePath = base +/+ "samples" +/+ "pad1.wav";
+        buf = Buffer.read(s, samplePath);
+        s.sync;
+        buf.query;
+        s.sync;
+
+        if(buf.numFrames == 0, {
+            "WARNING: Default sample failed to load: %".format(samplePath).postln;
+        }, {
+            "Loaded sample: % (% frames, % Hz)".format(
+                samplePath, buf.numFrames, buf.sampleRate).postln;
+        });
+
+        // ----------------------------------------------------------
+        // Ndefs — fade time so source/fx changes don't click
+        // ----------------------------------------------------------
+        [\source, \fx_filter, \fx_chorus, \fx_phaser, \fx_reverb].do { |n|
+            Ndef(n).fadeTime = 0.5;
+        };
+
+        // ----------------------------------------------------------
+        // SOURCE Ndef
+        // ----------------------------------------------------------
+        Ndef(\source, {
+            |mode=0,
+             bufnum=0,
+             sampleRate=1.0, sampleLoop=1,
+             grainDensity=10.0, grainDur=0.1, grainPosSpeed=0.5, grainPitch=1.0,
+             oscWave=0, oscFreq=220.0, oscVibRate=5.0, oscVibDepth=0.0,
+             noiseType=0,
+             amp=0.4|
+
+            var pos, trig, grainSig, oscSig, noiseSig, sampleSig;
+            var vibrato, oscBase;
+            var sig;
+
+            // --- Sample player (mono → stereo via ! 2) ---
+            sampleSig = PlayBuf.ar(
+                numChannels: 1,
+                bufnum: bufnum,
+                rate: BufRateScale.kr(bufnum) * sampleRate,
+                loop: sampleLoop
+            ) ! 2;
+
+            // --- Granular (mono → stereo via ! 2) ---
+            trig = Impulse.ar(grainDensity);
+            pos  = LFNoise1.kr(grainPosSpeed).range(0, 1);
+            grainSig = GrainBuf.ar(
+                numChannels: 1,
+                trigger: trig,
+                dur: grainDur,
+                sndbuf: bufnum,
+                rate: grainPitch,
+                pos: pos,
+                interp: 2
+            ) ! 2;
+
+            // --- Oscillator (Select.ar over 4 wave types) ---
+            vibrato = SinOsc.kr(oscVibRate) * oscVibDepth;
+            oscBase = oscFreq + vibrato;
+            oscSig = Select.ar(oscWave, [
+                SinOsc.ar(oscBase),
+                LFSaw.ar(oscBase),
+                LFPulse.ar(oscBase),
+                LFTri.ar(oscBase)
+            ]);
+            oscSig = oscSig ! 2;   // mono -> stereo
+
+            // --- Noise (Select.ar over 3 noise types) ---
+            noiseSig = Select.ar(noiseType, [
+                WhiteNoise.ar ! 2,
+                PinkNoise.ar ! 2,
+                BrownNoise.ar ! 2
+            ]);
+
+            // --- Mode selection (Select.ar — no language-side branching) ---
+            sig = Select.ar(mode, [sampleSig, grainSig, oscSig, noiseSig]);
+
+            sig * amp;
+        });
+
+        Ndef(\source).set(
+            \mode,         sourceMode,
+            \bufnum,       buf.bufnum,
+            \sampleRate,   sampleRate,
+            \sampleLoop,   sampleLoop,
+            \grainDensity, grainDensity,
+            \grainDur,     grainDur,
+            \grainPosSpeed,grainPosSpeed,
+            \grainPitch,   grainPitch,
+            \oscWave,      oscWave,
+            \oscFreq,      oscFreq,
+            \oscVibRate,   oscVibRate,
+            \oscVibDepth,  oscVibDepth,
+            \noiseType,    noiseType,
+            \amp,          masterAmp
+        );
+
+        // ----------------------------------------------------------
+        // FX: Filter
+        // ----------------------------------------------------------
+        Ndef(\fx_filter, {
+            |bypass=1, filterType=0, cutoff=1000.0, rq=0.7|
+            var dry = Ndef(\source).ar(2);
+            var lp  = RLPF.ar(dry, cutoff, rq);
+            var hp  = RHPF.ar(dry, cutoff, rq);
+            var bp  = BPF.ar(dry, cutoff, rq);
+            var processed = Select.ar(filterType, [lp, hp, bp]);
+            // bypass=1 -> dry passthrough, bypass=0 -> processed
+            Select.ar(bypass, [processed, dry]);
+        });
+
+        Ndef(\fx_filter).set(
+            \bypass,     fxFilterBypass,
+            \filterType, filterType,
+            \cutoff,     filterCutoff,
+            \rq,         filterRq
+        );
+
+        // ----------------------------------------------------------
+        // FX: Chorus
+        // ----------------------------------------------------------
+        Ndef(\fx_chorus, {
+            |bypass=1, rate=1.0, depth=0.003, mix=0.5|
+            var dry = Ndef(\fx_filter).ar(2);
+            var lfo = SinOsc.kr(rate, [0, 0.5pi]) * depth + (depth * 2);
+            // Two detuned delay lines for stereo width
+            var wet = DelayC.ar(dry, 0.1, lfo);
+            var processed = (dry * (1 - mix)) + (wet * mix);
+            Select.ar(bypass, [processed, dry]);
+        });
+
+        Ndef(\fx_chorus).set(
+            \bypass, fxChorusBypass,
+            \rate,   chorusRate,
+            \depth,  chorusDepth,
+            \mix,    chorusMix
+        );
+
+        // ----------------------------------------------------------
+        // FX: Phaser (AllpassL cascade with LFO-swept delay + feedback)
+        // ----------------------------------------------------------
+        Ndef(\fx_phaser, {
+            |bypass=1, rate=0.5, feedback=0.6, mix=0.5|
+            var dry = Ndef(\fx_chorus).ar(2);
+            var lfo = SinOsc.kr(rate).range(0.001, 0.02);
+            var fb = LocalIn.ar(2);
+            var wet = dry + (fb * feedback);
+            var processed;
+            // 6-stage allpass cascade with staggered LFO delay times
+            6.do { |i|
+                var delTime = lfo + (i * 0.002);
+                wet = AllpassL.ar(wet, 0.025, delTime, 0.0);
+            };
+            LocalOut.ar(wet);
+            processed = (dry * (1 - mix)) + (wet * mix);
+            Select.ar(bypass, [processed, dry]);
+        });
+
+        Ndef(\fx_phaser).set(
+            \bypass,   fxPhaserBypass,
+            \rate,     phaserRate,
+            \feedback, phaserFeedback,
+            \mix,      phaserMix
+        );
+
+        // ----------------------------------------------------------
+        // FX: Reverb
+        // ----------------------------------------------------------
+        Ndef(\fx_reverb, {
+            |bypass=1, room=0.6, damp=0.5, mix=0.3|
+            var dry = Ndef(\fx_phaser).ar(2);
+            var wet = FreeVerb.ar(dry, mix, room, damp);
+            Select.ar(bypass, [wet, dry]);
+        });
+
+        Ndef(\fx_reverb).set(
+            \bypass, fxReverbBypass,
+            \room,   reverbRoom,
+            \damp,   reverbDamp,
+            \mix,    reverbMix
+        );
+
+        // Route reverb output to hardware
+        Ndef(\fx_reverb).play(0, 2);
+
+        "Workbench Ndefs initialized.".postln;
+
+        // ----------------------------------------------------------
+        // GUI
+        // ----------------------------------------------------------
+        {
+            var scrollContent, scroll;
+            var srcButtons = Array.new(4);
+            var loadBtn;
+            var loadingGuard = false;
+
+            w = Window("Shrine Workbench", Rect(40, 40, 600, 1200));
+            w.view.background = Color.gray(0.15);
+
+            scrollContent = View(w.view, w.view.bounds);
+            scrollContent.background = Color.gray(0.15);
+            scrollContent.addFlowLayout(8@8, 4@4);
+
+            // ======================================================
+            // SOURCE
+            // ======================================================
+            sectionLabel.(scrollContent, "SOURCE");
+
+            // Radio-style row of 4 source buttons
+            ["Sample", "Granular", "Oscillator", "Noise"].do { |label, i|
+                var btn = Button(scrollContent, 130@28)
+                    .states_([
+                        [label, Color.white, Color.gray(0.3)],
+                        [label, Color.black, Color(0.3, 0.7, 1.0)]
+                    ])
+                    .value_(if(i == sourceMode, { 1 }, { 0 }))
+                    .action_({ |b|
+                        // If turning on, deactivate all others
+                        if(b.value == 1, {
+                            srcButtons.do { |other, j|
+                                if(j != i, { other.value_(0) });
+                            };
+                            sourceMode = i;
+                            Ndef(\source).set(\mode, i);
+                        }, {
+                            // Prevent deselecting current (must always have one active)
+                            b.value_(1);
+                        });
+                    });
+                srcButtons.add(btn);
+            };
+
+            // "Load Sample" button
+            scrollContent.decorator.nextLine;
+            loadBtn = Button(scrollContent, 180@26)
+                .states_([
+                    ["Load Sample...", Color.black, Color.gray(0.7)],
+                    ["Loading...",     Color.gray(0.5), Color.gray(0.4)]
+                ])
+                .action_({
+                    if(loadingGuard.not, {
+                        Dialog.openPanel({ |path|
+                            loadingGuard = true;
+                            { loadBtn.value_(1) }.defer;
+                            Routine({
+                                var newBuf = Buffer.read(s, path);
+                                s.sync;
+                                newBuf.query;
+                                s.sync;
+                                if(newBuf.numFrames == 0, {
+                                    ("WARNING: Failed to load: " ++ path).postln;
+                                }, {
+                                    buf.free;
+                                    buf = newBuf;
+                                    Ndef(\source).set(\bufnum, buf.bufnum);
+                                    ("Loaded: " ++ path).postln;
+                                });
+                                loadingGuard = false;
+                                { loadBtn.value_(0) }.defer;
+                            }).play(AppClock);
+                        }, {
+                            // cancelled — no-op
+                        }, false);
+                    });
+                });
+
+            // ---- Sample / Granular params ----
+            scrollContent.decorator.nextLine;
+            StaticText(scrollContent, 560@16).string_("  Sample / Granular")
+                .stringColor_(Color.gray(0.6)).font_(Font.default.copy.italic_(true));
+
+            makeSlider.(scrollContent, "playback rate",
+                ControlSpec(0.25, 4.0, \exp, 0, 1.0),
+                sampleRate,
+                { |ez| sampleRate = ez.value; Ndef(\source).set(\sampleRate, ez.value) });
+
+            Button(scrollContent, 120@26)
+                .states_([
+                    ["loop: OFF", Color.white, Color.gray(0.35)],
+                    ["loop: ON",  Color.black, Color(0.3, 0.7, 1.0)]
+                ])
+                .value_(sampleLoop)
+                .action_({ |b|
+                    sampleLoop = b.value;
+                    Ndef(\source).set(\sampleLoop, b.value);
+                });
+
+            scrollContent.decorator.nextLine;
+            makeSlider.(scrollContent, "grain density (Hz)",
+                ControlSpec(1.0, 60.0, \exp, 0, grainDensity),
+                grainDensity,
+                { |ez| grainDensity = ez.value; Ndef(\source).set(\grainDensity, ez.value) });
+
+            makeSlider.(scrollContent, "grain duration (s)",
+                ControlSpec(0.01, 0.5, \exp, 0, grainDur),
+                grainDur,
+                { |ez| grainDur = ez.value; Ndef(\source).set(\grainDur, ez.value) });
+
+            makeSlider.(scrollContent, "grain pos speed",
+                ControlSpec(0.1, 5.0, \exp, 0, grainPosSpeed),
+                grainPosSpeed,
+                { |ez| grainPosSpeed = ez.value; Ndef(\source).set(\grainPosSpeed, ez.value) });
+
+            makeSlider.(scrollContent, "grain pitch",
+                ControlSpec(0.25, 4.0, \exp, 0, grainPitch),
+                grainPitch,
+                { |ez| grainPitch = ez.value; Ndef(\source).set(\grainPitch, ez.value) });
+
+            // ---- Oscillator params ----
+            scrollContent.decorator.nextLine;
+            StaticText(scrollContent, 560@16).string_("  Oscillator")
+                .stringColor_(Color.gray(0.6)).font_(Font.default.copy.italic_(true));
+
+            StaticText(scrollContent, 80@26).string_("waveform:")
+                .stringColor_(Color.white);
+            PopUpMenu(scrollContent, 160@26)
+                .items_(["Sine", "Saw", "Square", "Triangle"])
+                .value_(oscWave)
+                .action_({ |m|
+                    oscWave = m.value;
+                    Ndef(\source).set(\oscWave, m.value);
+                });
+
+            scrollContent.decorator.nextLine;
+            makeSlider.(scrollContent, "frequency (Hz)",
+                ControlSpec(20.0, 8000.0, \exp, 0, oscFreq),
+                oscFreq,
+                { |ez| oscFreq = ez.value; Ndef(\source).set(\oscFreq, ez.value) });
+
+            makeSlider.(scrollContent, "vibrato rate (Hz)",
+                ControlSpec(0.1, 10.0, \lin, 0, oscVibRate),
+                oscVibRate,
+                { |ez| oscVibRate = ez.value; Ndef(\source).set(\oscVibRate, ez.value) });
+
+            makeSlider.(scrollContent, "vibrato depth (Hz)",
+                ControlSpec(0.0, 50.0, \lin, 0, oscVibDepth),
+                oscVibDepth,
+                { |ez| oscVibDepth = ez.value; Ndef(\source).set(\oscVibDepth, ez.value) });
+
+            // ---- Noise params ----
+            scrollContent.decorator.nextLine;
+            StaticText(scrollContent, 560@16).string_("  Noise")
+                .stringColor_(Color.gray(0.6)).font_(Font.default.copy.italic_(true));
+
+            StaticText(scrollContent, 80@26).string_("noise type:")
+                .stringColor_(Color.white);
+            PopUpMenu(scrollContent, 160@26)
+                .items_(["White", "Pink", "Brown"])
+                .value_(noiseType)
+                .action_({ |m|
+                    noiseType = m.value;
+                    Ndef(\source).set(\noiseType, m.value);
+                });
+
+            // ======================================================
+            // EFFECTS
+            // ======================================================
+            scrollContent.decorator.nextLine;
+            sectionLabel.(scrollContent, "EFFECTS");
+
+            // ---- Filter ----
+            makeBypassButton.(scrollContent, "Filter", fxFilterBypass, { |b|
+                fxFilterBypass = if(b.value == 0, { 1 }, { 0 });
+                Ndef(\fx_filter).set(\bypass, fxFilterBypass);
+            });
+
+            StaticText(scrollContent, 80@26).string_("type:").stringColor_(Color.white);
+            PopUpMenu(scrollContent, 160@26)
+                .items_(["Lowpass", "Highpass", "Bandpass"])
+                .value_(filterType)
+                .action_({ |m|
+                    filterType = m.value;
+                    Ndef(\fx_filter).set(\filterType, m.value);
+                });
+
+            scrollContent.decorator.nextLine;
+            makeSlider.(scrollContent, "cutoff (Hz)",
+                ControlSpec(20.0, 20000.0, \exp, 0, filterCutoff),
+                filterCutoff,
+                { |ez| filterCutoff = ez.value; Ndef(\fx_filter).set(\cutoff, ez.value) });
+
+            makeSlider.(scrollContent, "resonance (rq)",
+                ControlSpec(0.1, 2.0, \lin, 0, filterRq),
+                filterRq,
+                { |ez| filterRq = ez.value; Ndef(\fx_filter).set(\rq, ez.value) });
+
+            // ---- Chorus ----
+            scrollContent.decorator.nextLine;
+            makeBypassButton.(scrollContent, "Chorus", fxChorusBypass, { |b|
+                fxChorusBypass = if(b.value == 0, { 1 }, { 0 });
+                Ndef(\fx_chorus).set(\bypass, fxChorusBypass);
+            });
+
+            scrollContent.decorator.nextLine;
+            makeSlider.(scrollContent, "rate (Hz)",
+                ControlSpec(0.1, 5.0, \lin, 0, chorusRate),
+                chorusRate,
+                { |ez| chorusRate = ez.value; Ndef(\fx_chorus).set(\rate, ez.value) });
+
+            makeSlider.(scrollContent, "depth (s)",
+                ControlSpec(0.0, 0.01, \lin, 0, chorusDepth),
+                chorusDepth,
+                { |ez| chorusDepth = ez.value; Ndef(\fx_chorus).set(\depth, ez.value) });
+
+            makeSlider.(scrollContent, "mix",
+                ControlSpec(0.0, 1.0, \lin, 0, chorusMix),
+                chorusMix,
+                { |ez| chorusMix = ez.value; Ndef(\fx_chorus).set(\mix, ez.value) });
+
+            // ---- Phaser ----
+            scrollContent.decorator.nextLine;
+            makeBypassButton.(scrollContent, "Phaser", fxPhaserBypass, { |b|
+                fxPhaserBypass = if(b.value == 0, { 1 }, { 0 });
+                Ndef(\fx_phaser).set(\bypass, fxPhaserBypass);
+            });
+
+            scrollContent.decorator.nextLine;
+            makeSlider.(scrollContent, "rate (Hz)",
+                ControlSpec(0.1, 5.0, \lin, 0, phaserRate),
+                phaserRate,
+                { |ez| phaserRate = ez.value; Ndef(\fx_phaser).set(\rate, ez.value) });
+
+            makeSlider.(scrollContent, "feedback",
+                ControlSpec(0.0, 0.9, \lin, 0, phaserFeedback),
+                phaserFeedback,
+                { |ez| phaserFeedback = ez.value; Ndef(\fx_phaser).set(\feedback, ez.value) });
+
+            makeSlider.(scrollContent, "mix",
+                ControlSpec(0.0, 1.0, \lin, 0, phaserMix),
+                phaserMix,
+                { |ez| phaserMix = ez.value; Ndef(\fx_phaser).set(\mix, ez.value) });
+
+            // ---- Reverb ----
+            scrollContent.decorator.nextLine;
+            makeBypassButton.(scrollContent, "Reverb", fxReverbBypass, { |b|
+                fxReverbBypass = if(b.value == 0, { 1 }, { 0 });
+                Ndef(\fx_reverb).set(\bypass, fxReverbBypass);
+            });
+
+            scrollContent.decorator.nextLine;
+            makeSlider.(scrollContent, "room size",
+                ControlSpec(0.0, 1.0, \lin, 0, reverbRoom),
+                reverbRoom,
+                { |ez| reverbRoom = ez.value; Ndef(\fx_reverb).set(\room, ez.value) });
+
+            makeSlider.(scrollContent, "damping",
+                ControlSpec(0.0, 1.0, \lin, 0, reverbDamp),
+                reverbDamp,
+                { |ez| reverbDamp = ez.value; Ndef(\fx_reverb).set(\damp, ez.value) });
+
+            makeSlider.(scrollContent, "mix",
+                ControlSpec(0.0, 1.0, \lin, 0, reverbMix),
+                reverbMix,
+                { |ez| reverbMix = ez.value; Ndef(\fx_reverb).set(\mix, ez.value) });
+
+            // ======================================================
+            // OUTPUT
+            // ======================================================
+            scrollContent.decorator.nextLine;
+            sectionLabel.(scrollContent, "OUTPUT");
+
+            makeSlider.(scrollContent, "master volume",
+                ControlSpec(0.0, 1.0, \lin, 0, masterAmp),
+                masterAmp,
+                { |ez| masterAmp = ez.value; Ndef(\source).set(\amp, ez.value) });
+
+            scrollContent.decorator.nextLine;
+
+            // Scope and spectrum in separate windows (FreqScopeView cannot be
+            // reliably embedded in a ScrollView on all platforms)
+            Button(scrollContent, 130@28)
+                .states_([["Waveform scope", Color.black, Color.gray(0.7)]])
+                .action_({ s.scope(numChannels: 2) });
+
+            Button(scrollContent, 140@28)
+                .states_([["Spectrum scope", Color.black, Color.gray(0.7)]])
+                .action_({ FreqScope.new(400, 200, 0, server: s) });
+
+            Button(scrollContent, 100@28)
+                .states_([["node tree", Color.black, Color.gray(0.7)]])
+                .action_({ s.plotTree });
+
+            w.onClose_({
+                Ndef(\fx_reverb).clear;
+                Ndef(\fx_phaser).clear;
+                Ndef(\fx_chorus).clear;
+                Ndef(\fx_filter).clear;
+                Ndef(\source).clear;
+                buf.free;
+                "Workbench closed. Ndefs cleared.".postln;
+            });
+
+            w.front;
+            "Workbench GUI ready.".postln;
+        }.fork(AppClock);
+
+    }).play(AppClock);
+});
+)
