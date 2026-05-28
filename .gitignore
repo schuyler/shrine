@@ -28,5 +28,8 @@ edge-node/test/test_tinyosc
 .DS_Store
 Thumbs.db
 
+# Local config
+.envrc.local
+
 # Audio samples -- don't check these into Git (at least not yet)
 sc/samples/

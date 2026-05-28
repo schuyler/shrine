@@ -194,33 +194,40 @@ var openFreesoundSearch = {
 
         // Helper: populate resultsList from a pager
         populateResults = { |pager|
-            var items = [];
-            var sounds = [];
-            pager.do { |snd, i|
-                items = items.add(
-                    "%: % (%.1fs) — %".format(
-                        i + 1,
-                        snd["name"],
-                        snd["duration"],
-                        snd["username"]
-                    )
-                );
-                sounds = sounds.add(snd);
-            };
-            currentPager = pager;
-            currentSounds = sounds;
-            {
-                if(items.size > 0, {
-                    resultsList.items_(items);
-                }, {
-                    resultsList.items_(["(no results)"]);
-                });
-                prevBtn.enabled_(pager.dict["prev"].notNil);
-                nextBtn.enabled_(pager.dict["next"].notNil);
-                statusText.string_(
-                    "% result(s) — use Prev/Next to page".format(items.size)
-                );
-            }.defer;
+            if(pager.isNil, {
+                {
+                    resultsList.items_(["(search failed)"]);
+                    statusText.string_("Search failed — check post window.");
+                }.defer;
+            }, {
+                var items = [];
+                var sounds = [];
+                pager.do { |snd, i|
+                    items = items.add(
+                        "%: % (%.1fs) — %".format(
+                            i + 1,
+                            snd["name"],
+                            snd["duration"] ? 0,
+                            snd["username"]
+                        )
+                    );
+                    sounds = sounds.add(snd);
+                };
+                currentPager = pager;
+                currentSounds = sounds;
+                {
+                    if(items.size > 0, {
+                        resultsList.items_(items);
+                    }, {
+                        resultsList.items_(["(no results)"]);
+                    });
+                    prevBtn.enabled_(pager.dict["prev"].notNil);
+                    nextBtn.enabled_(pager.dict["next"].notNil);
+                    statusText.string_(
+                        "% result(s) — use Prev/Next to page".format(items.size)
+                    );
+                }.defer;
+            });
         };
 
         // Go button action
@@ -235,7 +242,7 @@ var openFreesoundSearch = {
                     query:  query,
                     filter: filter,
                     sort:   nil,
-                    params: IdentityDictionary["fields" -> "id,name,tags,username,license,previews,duration"],
+                    params: nil,
                     action: { |pager|
                         populateResults.(pager);
                     }
@@ -284,7 +291,7 @@ var openFreesoundSearch = {
                                     var filePath = freesoundDir +/+ snd.previewFilename("mp3");
                                     var newBuf;
                                     if(exitCode == 0, {
-                                        newBuf = Buffer.read(s, filePath);
+                                        newBuf = Buffer.readChannel(s, filePath, channels: [0]);
                                         s.sync;
                                         newBuf.query;
                                         s.sync;
@@ -357,7 +364,7 @@ s.waitForBoot({
     Routine({
         var base = PathName(thisProcess.nowExecutingPath).pathOnly;
         samplePath = base +/+ "samples" +/+ "pad1.wav";
-        buf = Buffer.read(s, samplePath);
+        buf = Buffer.readChannel(s, samplePath, channels: [0]);
         s.sync;
         buf.query;
         s.sync;
@@ -376,6 +383,7 @@ s.waitForBoot({
             if(\Freesound.asClass.notNil, {
                 Freesound.authType = "token";
                 Freesound.token = freesoundToken;
+                Freesound.defaultFields = "id,name,tags,username,license,previews,duration";
                 freesoundAvailable = true;
                 "Freesound integration available.".postln;
             }, {
@@ -644,7 +652,7 @@ s.waitForBoot({
                             loadingGuard = true;
                             { loadBtn.value_(1) }.defer;
                             Routine({
-                                var newBuf = Buffer.read(s, path);
+                                var newBuf = Buffer.readChannel(s, path, channels: [0]);
                                 s.sync;
                                 newBuf.query;
                                 s.sync;
@@ -661,7 +669,7 @@ s.waitForBoot({
                             }).play(AppClock);
                         }, {
                             // cancelled — no-op
-                        }, false);
+                        }, false, freesoundDir.dirname);
                     });
                 });
 
