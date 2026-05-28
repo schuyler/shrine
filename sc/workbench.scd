@@ -73,8 +73,10 @@ var reverbMix       = 0.3;
 var masterAmp     = 0.4;
 
 // Helpers
+var colWidth = 520;
+
 var sectionLabel = { |parent, text|
-    var lbl = StaticText(parent, Rect(0, 0, 560, 22));
+    var lbl = StaticText(parent, Rect(0, 0, colWidth, 22));
     lbl.string = text;
     lbl.font = Font.default.copy.bold_(true).size_(13);
     lbl.stringColor = Color.white;
@@ -82,8 +84,8 @@ var sectionLabel = { |parent, text|
 };
 
 var makeSlider = { |parent, label, spec, initVal, action|
-    var ez = EZSlider(parent, 560@26, label, spec, action, initVal,
-        unitWidth: 0, labelWidth: 160);
+    var ez = EZSlider(parent, colWidth@26, label, spec, action, initVal,
+        unitWidth: 0, labelWidth: 150);
     ez.labelView.stringColor = Color.white;
     ez.numberView.stringColor = Color.white;
     ez.numberView.normalColor = Color.white;
@@ -110,6 +112,13 @@ var makeBypassButton = { |parent, label, initBypass, action|
 s = Server.default;
 s.options.numOutputBusChannels = 2;
 s.options.numInputBusChannels  = 0;
+s.options.sampleRate = 48000;
+s.options.hardwareBufferSize = 1024;
+// scsynth 3.14 queries the input device even with 0 input channels,
+// crashing on Bluetooth devices with mismatched input/output sample rates.
+// Workaround: create an Aggregate Device in Audio MIDI Setup combining
+// the Bluetooth output with the built-in mic, both at 48kHz.
+s.options.device_("SuperCollider");
 
 // ------------------------------------------------------------------
 // Boot sequence
@@ -309,33 +318,38 @@ s.waitForBoot({
         // GUI
         // ----------------------------------------------------------
         {
-            var scrollContent, scroll;
+            var leftCol, rightCol;
             var srcButtons = Array.new(4);
             var loadBtn;
             var loadingGuard = false;
+            var pad = 10;
 
-            w = Window("Shrine Workbench", Rect(40, 40, 600, 1200));
+            w = Window("Shrine Workbench", Rect(40, 40, (colWidth + pad) * 2 + pad, 660));
             w.view.background = Color.gray(0.15);
 
-            scrollContent = View(w.view, w.view.bounds);
-            scrollContent.background = Color.gray(0.15);
-            scrollContent.addFlowLayout(8@8, 4@4);
+            // Two-column layout: sources on left, effects + output on right
+            leftCol = View(w.view, Rect(pad, pad, colWidth, 620));
+            leftCol.background = Color.gray(0.15);
+            leftCol.addFlowLayout(0@0, 4@4);
+
+            rightCol = View(w.view, Rect(colWidth + (pad * 2), pad, colWidth, 620));
+            rightCol.background = Color.gray(0.15);
+            rightCol.addFlowLayout(0@0, 4@4);
 
             // ======================================================
-            // SOURCE
+            // LEFT COLUMN: SOURCE
             // ======================================================
-            sectionLabel.(scrollContent, "SOURCE");
+            sectionLabel.(leftCol, "SOURCE");
 
             // Radio-style row of 4 source buttons
             ["Sample", "Granular", "Oscillator", "Noise"].do { |label, i|
-                var btn = Button(scrollContent, 130@28)
+                var btn = Button(leftCol, 125@28)
                     .states_([
                         [label, Color.white, Color.gray(0.3)],
                         [label, Color.black, Color(0.3, 0.7, 1.0)]
                     ])
                     .value_(if(i == sourceMode, { 1 }, { 0 }))
                     .action_({ |b|
-                        // If turning on, deactivate all others
                         if(b.value == 1, {
                             srcButtons.do { |other, j|
                                 if(j != i, { other.value_(0) });
@@ -343,7 +357,6 @@ s.waitForBoot({
                             sourceMode = i;
                             Ndef(\source).set(\mode, i);
                         }, {
-                            // Prevent deselecting current (must always have one active)
                             b.value_(1);
                         });
                     });
@@ -351,8 +364,8 @@ s.waitForBoot({
             };
 
             // "Load Sample" button
-            scrollContent.decorator.nextLine;
-            loadBtn = Button(scrollContent, 180@26)
+            leftCol.decorator.nextLine;
+            loadBtn = Button(leftCol, 180@26)
                 .states_([
                     ["Load Sample...", Color.black, Color.gray(0.7)],
                     ["Loading...",     Color.gray(0.5), Color.gray(0.4)]
@@ -385,16 +398,16 @@ s.waitForBoot({
                 });
 
             // ---- Sample / Granular params ----
-            scrollContent.decorator.nextLine;
-            StaticText(scrollContent, 560@16).string_("  Sample / Granular")
+            leftCol.decorator.nextLine;
+            StaticText(leftCol, colWidth@16).string_("  Sample / Granular")
                 .stringColor_(Color.gray(0.6)).font_(Font.default.copy.italic_(true));
 
-            makeSlider.(scrollContent, "playback rate",
+            makeSlider.(leftCol, "playback rate",
                 ControlSpec(0.25, 4.0, \exp, 0, 1.0),
                 sampleRate,
                 { |ez| sampleRate = ez.value; Ndef(\source).set(\sampleRate, ez.value) });
 
-            Button(scrollContent, 120@26)
+            Button(leftCol, 120@26)
                 .states_([
                     ["loop: OFF", Color.white, Color.gray(0.35)],
                     ["loop: ON",  Color.black, Color(0.3, 0.7, 1.0)]
@@ -405,35 +418,35 @@ s.waitForBoot({
                     Ndef(\source).set(\sampleLoop, b.value);
                 });
 
-            scrollContent.decorator.nextLine;
-            makeSlider.(scrollContent, "grain density (Hz)",
+            leftCol.decorator.nextLine;
+            makeSlider.(leftCol, "grain density (Hz)",
                 ControlSpec(1.0, 60.0, \exp, 0, grainDensity),
                 grainDensity,
                 { |ez| grainDensity = ez.value; Ndef(\source).set(\grainDensity, ez.value) });
 
-            makeSlider.(scrollContent, "grain duration (s)",
+            makeSlider.(leftCol, "grain duration (s)",
                 ControlSpec(0.01, 0.5, \exp, 0, grainDur),
                 grainDur,
                 { |ez| grainDur = ez.value; Ndef(\source).set(\grainDur, ez.value) });
 
-            makeSlider.(scrollContent, "grain pos speed",
+            makeSlider.(leftCol, "grain pos speed",
                 ControlSpec(0.1, 5.0, \exp, 0, grainPosSpeed),
                 grainPosSpeed,
                 { |ez| grainPosSpeed = ez.value; Ndef(\source).set(\grainPosSpeed, ez.value) });
 
-            makeSlider.(scrollContent, "grain pitch",
+            makeSlider.(leftCol, "grain pitch",
                 ControlSpec(0.25, 4.0, \exp, 0, grainPitch),
                 grainPitch,
                 { |ez| grainPitch = ez.value; Ndef(\source).set(\grainPitch, ez.value) });
 
             // ---- Oscillator params ----
-            scrollContent.decorator.nextLine;
-            StaticText(scrollContent, 560@16).string_("  Oscillator")
+            leftCol.decorator.nextLine;
+            StaticText(leftCol, colWidth@16).string_("  Oscillator")
                 .stringColor_(Color.gray(0.6)).font_(Font.default.copy.italic_(true));
 
-            StaticText(scrollContent, 80@26).string_("waveform:")
+            StaticText(leftCol, 80@26).string_("waveform:")
                 .stringColor_(Color.white);
-            PopUpMenu(scrollContent, 160@26)
+            PopUpMenu(leftCol, 160@26)
                 .items_(["Sine", "Saw", "Square", "Triangle"])
                 .value_(oscWave)
                 .action_({ |m|
@@ -441,30 +454,30 @@ s.waitForBoot({
                     Ndef(\source).set(\oscWave, m.value);
                 });
 
-            scrollContent.decorator.nextLine;
-            makeSlider.(scrollContent, "frequency (Hz)",
+            leftCol.decorator.nextLine;
+            makeSlider.(leftCol, "frequency (Hz)",
                 ControlSpec(20.0, 8000.0, \exp, 0, oscFreq),
                 oscFreq,
                 { |ez| oscFreq = ez.value; Ndef(\source).set(\oscFreq, ez.value) });
 
-            makeSlider.(scrollContent, "vibrato rate (Hz)",
+            makeSlider.(leftCol, "vibrato rate (Hz)",
                 ControlSpec(0.1, 10.0, \lin, 0, oscVibRate),
                 oscVibRate,
                 { |ez| oscVibRate = ez.value; Ndef(\source).set(\oscVibRate, ez.value) });
 
-            makeSlider.(scrollContent, "vibrato depth (Hz)",
+            makeSlider.(leftCol, "vibrato depth (Hz)",
                 ControlSpec(0.0, 50.0, \lin, 0, oscVibDepth),
                 oscVibDepth,
                 { |ez| oscVibDepth = ez.value; Ndef(\source).set(\oscVibDepth, ez.value) });
 
             // ---- Noise params ----
-            scrollContent.decorator.nextLine;
-            StaticText(scrollContent, 560@16).string_("  Noise")
+            leftCol.decorator.nextLine;
+            StaticText(leftCol, colWidth@16).string_("  Noise")
                 .stringColor_(Color.gray(0.6)).font_(Font.default.copy.italic_(true));
 
-            StaticText(scrollContent, 80@26).string_("noise type:")
+            StaticText(leftCol, 80@26).string_("noise type:")
                 .stringColor_(Color.white);
-            PopUpMenu(scrollContent, 160@26)
+            PopUpMenu(leftCol, 160@26)
                 .items_(["White", "Pink", "Brown"])
                 .value_(noiseType)
                 .action_({ |m|
@@ -473,19 +486,18 @@ s.waitForBoot({
                 });
 
             // ======================================================
-            // EFFECTS
+            // RIGHT COLUMN: EFFECTS + OUTPUT
             // ======================================================
-            scrollContent.decorator.nextLine;
-            sectionLabel.(scrollContent, "EFFECTS");
+            sectionLabel.(rightCol, "EFFECTS");
 
             // ---- Filter ----
-            makeBypassButton.(scrollContent, "Filter", fxFilterBypass, { |b|
+            makeBypassButton.(rightCol, "Filter", fxFilterBypass, { |b|
                 fxFilterBypass = if(b.value == 0, { 1 }, { 0 });
                 Ndef(\fx_filter).set(\bypass, fxFilterBypass);
             });
 
-            StaticText(scrollContent, 80@26).string_("type:").stringColor_(Color.white);
-            PopUpMenu(scrollContent, 160@26)
+            StaticText(rightCol, 80@26).string_("type:").stringColor_(Color.white);
+            PopUpMenu(rightCol, 160@26)
                 .items_(["Lowpass", "Highpass", "Bandpass"])
                 .value_(filterType)
                 .action_({ |m|
@@ -493,110 +505,105 @@ s.waitForBoot({
                     Ndef(\fx_filter).set(\filterType, m.value);
                 });
 
-            scrollContent.decorator.nextLine;
-            makeSlider.(scrollContent, "cutoff (Hz)",
+            rightCol.decorator.nextLine;
+            makeSlider.(rightCol, "cutoff (Hz)",
                 ControlSpec(20.0, 20000.0, \exp, 0, filterCutoff),
                 filterCutoff,
                 { |ez| filterCutoff = ez.value; Ndef(\fx_filter).set(\cutoff, ez.value) });
 
-            makeSlider.(scrollContent, "resonance (rq)",
+            makeSlider.(rightCol, "resonance (rq)",
                 ControlSpec(0.1, 2.0, \lin, 0, filterRq),
                 filterRq,
                 { |ez| filterRq = ez.value; Ndef(\fx_filter).set(\rq, ez.value) });
 
             // ---- Chorus ----
-            scrollContent.decorator.nextLine;
-            makeBypassButton.(scrollContent, "Chorus", fxChorusBypass, { |b|
+            rightCol.decorator.nextLine;
+            makeBypassButton.(rightCol, "Chorus", fxChorusBypass, { |b|
                 fxChorusBypass = if(b.value == 0, { 1 }, { 0 });
                 Ndef(\fx_chorus).set(\bypass, fxChorusBypass);
             });
 
-            scrollContent.decorator.nextLine;
-            makeSlider.(scrollContent, "rate (Hz)",
+            rightCol.decorator.nextLine;
+            makeSlider.(rightCol, "rate (Hz)",
                 ControlSpec(0.1, 5.0, \lin, 0, chorusRate),
                 chorusRate,
                 { |ez| chorusRate = ez.value; Ndef(\fx_chorus).set(\rate, ez.value) });
 
-            makeSlider.(scrollContent, "depth (s)",
+            makeSlider.(rightCol, "depth (s)",
                 ControlSpec(0.0, 0.01, \lin, 0, chorusDepth),
                 chorusDepth,
                 { |ez| chorusDepth = ez.value; Ndef(\fx_chorus).set(\depth, ez.value) });
 
-            makeSlider.(scrollContent, "mix",
+            makeSlider.(rightCol, "mix",
                 ControlSpec(0.0, 1.0, \lin, 0, chorusMix),
                 chorusMix,
                 { |ez| chorusMix = ez.value; Ndef(\fx_chorus).set(\mix, ez.value) });
 
             // ---- Phaser ----
-            scrollContent.decorator.nextLine;
-            makeBypassButton.(scrollContent, "Phaser", fxPhaserBypass, { |b|
+            rightCol.decorator.nextLine;
+            makeBypassButton.(rightCol, "Phaser", fxPhaserBypass, { |b|
                 fxPhaserBypass = if(b.value == 0, { 1 }, { 0 });
                 Ndef(\fx_phaser).set(\bypass, fxPhaserBypass);
             });
 
-            scrollContent.decorator.nextLine;
-            makeSlider.(scrollContent, "rate (Hz)",
+            rightCol.decorator.nextLine;
+            makeSlider.(rightCol, "rate (Hz)",
                 ControlSpec(0.1, 5.0, \lin, 0, phaserRate),
                 phaserRate,
                 { |ez| phaserRate = ez.value; Ndef(\fx_phaser).set(\rate, ez.value) });
 
-            makeSlider.(scrollContent, "feedback",
+            makeSlider.(rightCol, "feedback",
                 ControlSpec(0.0, 0.9, \lin, 0, phaserFeedback),
                 phaserFeedback,
                 { |ez| phaserFeedback = ez.value; Ndef(\fx_phaser).set(\feedback, ez.value) });
 
-            makeSlider.(scrollContent, "mix",
+            makeSlider.(rightCol, "mix",
                 ControlSpec(0.0, 1.0, \lin, 0, phaserMix),
                 phaserMix,
                 { |ez| phaserMix = ez.value; Ndef(\fx_phaser).set(\mix, ez.value) });
 
             // ---- Reverb ----
-            scrollContent.decorator.nextLine;
-            makeBypassButton.(scrollContent, "Reverb", fxReverbBypass, { |b|
+            rightCol.decorator.nextLine;
+            makeBypassButton.(rightCol, "Reverb", fxReverbBypass, { |b|
                 fxReverbBypass = if(b.value == 0, { 1 }, { 0 });
                 Ndef(\fx_reverb).set(\bypass, fxReverbBypass);
             });
 
-            scrollContent.decorator.nextLine;
-            makeSlider.(scrollContent, "room size",
+            rightCol.decorator.nextLine;
+            makeSlider.(rightCol, "room size",
                 ControlSpec(0.0, 1.0, \lin, 0, reverbRoom),
                 reverbRoom,
                 { |ez| reverbRoom = ez.value; Ndef(\fx_reverb).set(\room, ez.value) });
 
-            makeSlider.(scrollContent, "damping",
+            makeSlider.(rightCol, "damping",
                 ControlSpec(0.0, 1.0, \lin, 0, reverbDamp),
                 reverbDamp,
                 { |ez| reverbDamp = ez.value; Ndef(\fx_reverb).set(\damp, ez.value) });
 
-            makeSlider.(scrollContent, "mix",
+            makeSlider.(rightCol, "mix",
                 ControlSpec(0.0, 1.0, \lin, 0, reverbMix),
                 reverbMix,
                 { |ez| reverbMix = ez.value; Ndef(\fx_reverb).set(\mix, ez.value) });
 
-            // ======================================================
-            // OUTPUT
-            // ======================================================
-            scrollContent.decorator.nextLine;
-            sectionLabel.(scrollContent, "OUTPUT");
+            // ---- Output ----
+            rightCol.decorator.nextLine;
+            sectionLabel.(rightCol, "OUTPUT");
 
-            makeSlider.(scrollContent, "master volume",
+            makeSlider.(rightCol, "master volume",
                 ControlSpec(0.0, 1.0, \lin, 0, masterAmp),
                 masterAmp,
                 { |ez| masterAmp = ez.value; Ndef(\source).set(\amp, ez.value) });
 
-            scrollContent.decorator.nextLine;
-
-            // Scope and spectrum in separate windows (FreqScopeView cannot be
-            // reliably embedded in a ScrollView on all platforms)
-            Button(scrollContent, 130@28)
+            rightCol.decorator.nextLine;
+            Button(rightCol, 130@28)
                 .states_([["Waveform scope", Color.black, Color.gray(0.7)]])
                 .action_({ s.scope(numChannels: 2) });
 
-            Button(scrollContent, 140@28)
+            Button(rightCol, 140@28)
                 .states_([["Spectrum scope", Color.black, Color.gray(0.7)]])
                 .action_({ FreqScope.new(400, 200, 0, server: s) });
 
-            Button(scrollContent, 100@28)
+            Button(rightCol, 100@28)
                 .states_([["node tree", Color.black, Color.gray(0.7)]])
                 .action_({ s.plotTree });
 
