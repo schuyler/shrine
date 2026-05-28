@@ -200,9 +200,9 @@ var openFreesoundSearch = {
                 items = items.add(
                     "%: % (%.1fs) — %".format(
                         i + 1,
-                        snd.name,
-                        snd.duration,
-                        snd.username
+                        snd["name"],
+                        snd["duration"],
+                        snd["username"]
                     )
                 );
                 sounds = sounds.add(snd);
@@ -235,7 +235,7 @@ var openFreesoundSearch = {
                     query:  query,
                     filter: filter,
                     sort:   nil,
-                    params: nil,
+                    params: IdentityDictionary["fields" -> "id,name,tags,username,license,previews,duration"],
                     action: { |pager|
                         populateResults.(pager);
                     }
@@ -303,7 +303,7 @@ var openFreesoundSearch = {
                                                 } }.defer;
                                             });
                                             { statusText.string_(
-                                                "Loaded: %".format(snd.name)
+                                                "Loaded: %".format(snd["name"])
                                             ) }.defer;
                                         });
                                     }, {
