@@ -11,6 +11,8 @@
 //   4. Pick a source (Sample / Granular / Oscillator / Noise).
 //   5. Adjust effect stages with their bypass toggles and sliders.
 //   6. Use "Load Sample" to replace the default sample (sc/samples/pad1.wav).
+//   7. (Optional) For Freesound search: install the Freesound quark
+//      (Quarks.install("Freesound")) and set FREESOUND_API_TOKEN env var.
 //
 // SIGNAL CHAIN:
 //   Ndef(\source) → Ndef(\fx_filter) → Ndef(\fx_chorus)
@@ -24,6 +26,7 @@
 // All var declarations must precede executable code in SC.
 // ------------------------------------------------------------------
 var s, buf, samplePath, w;
+var srcButtons;
 
 // State variables (language-side; Ndefs read via .set)
 var sourceMode    = 0;     // 0=Sample, 1=Granular, 2=Oscillator, 3=Noise
@@ -54,7 +57,7 @@ var filterRq        = 0.7;
 // Chorus
 var fxChorusBypass  = 1;
 var chorusRate      = 1.0;
-var chorusDepth     = 0.003;
+var chorusDepth     = 3.0;
 var chorusMix       = 0.5;
 
 // Phaser
@@ -65,12 +68,18 @@ var phaserMix       = 0.5;
 
 // Reverb
 var fxReverbBypass  = 1;
-var reverbRoom      = 0.6;
+var reverbDecay     = 3.0;
 var reverbDamp      = 0.5;
-var reverbMix       = 0.3;
+var reverbMix       = 0.4;
 
 // Output
 var masterAmp     = 0.4;
+
+// Freesound integration
+var freesoundAvailable = false;
+var freesoundToken;
+var freesoundDir;
+var freesoundWin;
 
 // Helpers
 var colWidth = 520;
@@ -106,6 +115,227 @@ var makeBypassButton = { |parent, label, initBypass, action|
     btn;
 };
 
+var openFreesoundSearch = {
+    // Singleton — bring to front if already open
+    if(freesoundWin.notNil and: { freesoundWin.isClosed.not }, {
+        freesoundWin.front;
+    }, {
+        var searchField, goBtn, resultsList, statusText, loadBtn;
+        var prevBtn, nextBtn;
+        var minDurBox, maxDurBox;
+        var currentPager, currentSounds;
+        var populateResults;
+        var freesoundLoading = false;
+
+        freesoundWin = Window("Freesound Search", Rect(100, 100, 400, 520));
+        freesoundWin.view.background = Color.gray(0.15);
+        freesoundWin.view.addFlowLayout(8@8, 6@6);
+
+        // Search row
+        StaticText(freesoundWin.view, 55@24)
+            .string_("Search:")
+            .stringColor_(Color.white);
+        searchField = TextField(freesoundWin.view, 240@24)
+            .background_(Color.gray(0.25))
+            .stringColor_(Color.white);
+        goBtn = Button(freesoundWin.view, 60@24)
+            .states_([["Go", Color.black, Color.gray(0.7)]]);
+
+        // Duration filter row
+        freesoundWin.view.decorator.nextLine;
+        StaticText(freesoundWin.view, 60@24)
+            .string_("Duration:")
+            .stringColor_(Color.white);
+        minDurBox = NumberBox(freesoundWin.view, 50@24)
+            .value_(1)
+            .background_(Color.gray(0.25))
+            .normalColor_(Color.white)
+            .typingColor_(Color.cyan);
+        StaticText(freesoundWin.view, 20@24)
+            .string_("to")
+            .stringColor_(Color.white);
+        maxDurBox = NumberBox(freesoundWin.view, 50@24)
+            .value_(10)
+            .background_(Color.gray(0.25))
+            .normalColor_(Color.white)
+            .typingColor_(Color.cyan);
+        StaticText(freesoundWin.view, 30@24)
+            .string_("sec")
+            .stringColor_(Color.white);
+
+        // Results list
+        freesoundWin.view.decorator.nextLine;
+        resultsList = ListView(freesoundWin.view, 380@280)
+            .background_(Color.gray(0.2))
+            .stringColor_(Color.white)
+            .selectedStringColor_(Color.black)
+            .hiliteColor_(Color(0.3, 0.7, 1.0))
+            .items_(["(no results)"]);
+
+        // Status text
+        freesoundWin.view.decorator.nextLine;
+        statusText = StaticText(freesoundWin.view, 380@20)
+            .string_("")
+            .stringColor_(Color.gray(0.7));
+
+        // Navigation row
+        freesoundWin.view.decorator.nextLine;
+        prevBtn = Button(freesoundWin.view, 70@26)
+            .states_([["<< Prev", Color.white, Color.gray(0.35)]]);
+        nextBtn = Button(freesoundWin.view, 70@26)
+            .states_([["Next >>", Color.white, Color.gray(0.35)]]);
+        // Spacer
+        StaticText(freesoundWin.view, 90@26).string_("");
+        loadBtn = Button(freesoundWin.view, 140@26)
+            .states_([
+                ["Load into Workbench", Color.white, Color(0.1, 0.3, 0.8)],
+                ["Downloading...",      Color.gray(0.5), Color.gray(0.35)]
+            ]);
+
+        // Helper: populate resultsList from a pager
+        populateResults = { |pager|
+            var items = [];
+            var sounds = [];
+            pager.do { |snd, i|
+                items = items.add(
+                    "%: % (%.1fs) — %".format(
+                        i + 1,
+                        snd.name,
+                        snd.duration,
+                        snd.username
+                    )
+                );
+                sounds = sounds.add(snd);
+            };
+            currentPager = pager;
+            currentSounds = sounds;
+            {
+                if(items.size > 0, {
+                    resultsList.items_(items);
+                }, {
+                    resultsList.items_(["(no results)"]);
+                });
+                prevBtn.enabled_(pager.dict["prev"].notNil);
+                nextBtn.enabled_(pager.dict["next"].notNil);
+                statusText.string_(
+                    "% result(s) — use Prev/Next to page".format(items.size)
+                );
+            }.defer;
+        };
+
+        // Go button action
+        goBtn.action_({
+            var query  = searchField.string.stripWhiteSpace;
+            var minDur = minDurBox.value;
+            var maxDur = maxDurBox.value;
+            var filter = "duration:[% TO %]".format(minDur.asInteger, maxDur.asInteger);
+            if(query.size > 0, {
+                { statusText.string_("Searching...") }.defer;
+                FSSound.textSearch(
+                    query:  query,
+                    filter: filter,
+                    sort:   nil,
+                    params: nil,
+                    action: { |pager|
+                        populateResults.(pager);
+                    }
+                );
+            }, {
+                { statusText.string_("Enter a search term.") }.defer;
+            });
+        });
+
+        // Allow Enter key in search field to trigger Go
+        searchField.action_({ goBtn.doAction });
+
+        // Prev/Next
+        prevBtn.action_({
+            if(currentPager.notNil, {
+                { statusText.string_("Loading previous page...") }.defer;
+                currentPager.prev { |newPager| populateResults.(newPager) };
+            });
+        });
+
+        nextBtn.action_({
+            if(currentPager.notNil, {
+                { statusText.string_("Loading next page...") }.defer;
+                currentPager.next { |newPager| populateResults.(newPager) };
+            });
+        });
+
+        // Load button action
+        loadBtn.action_({
+            var idx = resultsList.value;
+            if(freesoundLoading.not and: {
+                currentSounds.notNil and: {
+                    idx.notNil and: { idx < currentSounds.size }
+                }
+            }, {
+                var snd = currentSounds[idx];
+                freesoundLoading = true;
+                { loadBtn.value_(1) }.defer;
+                File.mkdir(freesoundDir);
+                try {
+                    snd.retrievePreview(
+                        freesoundDir ++ "/",
+                        { |exitCode|
+                            Routine({
+                                try {
+                                    var filePath = freesoundDir +/+ snd.previewFilename("mp3");
+                                    var newBuf;
+                                    if(exitCode == 0, {
+                                        newBuf = Buffer.read(s, filePath);
+                                        s.sync;
+                                        newBuf.query;
+                                        s.sync;
+                                        if(newBuf.numFrames == 0, {
+                                            ("WARNING: Freesound preview loaded 0 frames: " ++ filePath).postln;
+                                            { statusText.string_("Load failed (0 frames).") }.defer;
+                                        }, {
+                                            buf.free;
+                                            buf = newBuf;
+                                            Ndef(\source).set(\bufnum, buf.bufnum);
+                                            if(sourceMode > 1, {
+                                                sourceMode = 0;
+                                                Ndef(\source).set(\mode, 0);
+                                                { srcButtons.do { |b, j|
+                                                    b.value_(if(j == 0, { 1 }, { 0 }))
+                                                } }.defer;
+                                            });
+                                            { statusText.string_(
+                                                "Loaded: %".format(snd.name)
+                                            ) }.defer;
+                                        });
+                                    }, {
+                                        ("WARNING: retrievePreview failed, exit code: " ++ exitCode).postln;
+                                        { statusText.string_(
+                                            "Download failed (exit %).".format(exitCode)
+                                        ) }.defer;
+                                    });
+                                } { |err|
+                                    err.reportError;
+                                    { statusText.string_("Error: " ++ err.errorString) }.defer;
+                                };
+                                freesoundLoading = false;
+                                { loadBtn.value_(0) }.defer;
+                            }).play(AppClock);
+                        },
+                        "hq",
+                        "mp3"
+                    );
+                } { |err|
+                    err.reportError;
+                    freesoundLoading = false;
+                    { loadBtn.value_(0) }.defer;
+                    { statusText.string_("Error launching download.") }.defer;
+                };
+            });
+        });
+
+        freesoundWin.front;
+    });
+};
+
 // ------------------------------------------------------------------
 // Server setup
 // ------------------------------------------------------------------
@@ -137,6 +367,22 @@ s.waitForBoot({
         }, {
             "Loaded sample: % (% frames, % Hz)".format(
                 samplePath, buf.numFrames, buf.sampleRate).postln;
+        });
+
+        // Freesound integration (optional — requires Freesound quark)
+        freesoundDir = base +/+ "samples" +/+ "freesound";
+        freesoundToken = "FREESOUND_API_TOKEN".getenv;
+        if(freesoundToken.notNil and: { freesoundToken.size > 0 }, {
+            if(\Freesound.asClass.notNil, {
+                Freesound.authType = "token";
+                Freesound.token = freesoundToken;
+                freesoundAvailable = true;
+                "Freesound integration available.".postln;
+            }, {
+                "Freesound quark not installed. Run: Quarks.install(\"Freesound\")".postln;
+            });
+        }, {
+            "FREESOUND_API_TOKEN not set — Freesound search disabled.".postln;
         });
 
         // ----------------------------------------------------------
@@ -249,9 +495,10 @@ s.waitForBoot({
         // FX: Chorus
         // ----------------------------------------------------------
         Ndef(\fx_chorus, {
-            |bypass=1, rate=1.0, depth=0.003, mix=0.5|
+            |bypass=1, rate=1.0, depth=3.0, mix=0.5|
             var dry = Ndef(\fx_filter).ar(2);
-            var lfo = SinOsc.kr(rate, [0, 0.5pi]) * depth + (depth * 2);
+            var depthSec = depth * 0.001;
+            var lfo = SinOsc.kr(rate, [0, 0.5pi]) * depthSec + (depthSec * 2);
             // Two detuned delay lines for stereo width
             var wet = DelayC.ar(dry, 0.1, lfo);
             var processed = (dry * (1 - mix)) + (wet * mix);
@@ -296,15 +543,35 @@ s.waitForBoot({
         // FX: Reverb
         // ----------------------------------------------------------
         Ndef(\fx_reverb, {
-            |bypass=1, room=0.6, damp=0.5, mix=0.3|
+            |bypass=1, decay=3.0, damp=0.5, mix=0.4|
             var dry = Ndef(\fx_phaser).ar(2);
-            var wet = FreeVerb.ar(dry, mix, room, damp);
-            Select.ar(bypass, [wet, dry]);
+            var input = dry;
+            var wet, lpf_freq, processed;
+            // Pre-delay
+            input = DelayN.ar(input, 0.05, 0.03);
+            // Damping: map 0..1 to 10kHz..1kHz
+            lpf_freq = damp.linexp(0, 1, 10000, 1000);
+            // 4 parallel comb filters with prime-ratio delays
+            wet = Mix.ar([
+                CombL.ar(input, 0.1, 0.0297, decay),
+                CombL.ar(input, 0.1, 0.0371, decay),
+                CombL.ar(input, 0.1, 0.0411, decay),
+                CombL.ar(input, 0.1, 0.0437, decay),
+            ]);
+            // Damping filter inside feedback path
+            wet = LPF.ar(wet, lpf_freq);
+            // 2 allpass diffusors
+            wet = AllpassL.ar(wet, 0.05, 0.005, decay * 0.5);
+            wet = AllpassL.ar(wet, 0.05, 0.017, decay * 0.5);
+            // Normalize — 4 comb filters sum, so scale down
+            wet = wet * 0.4;
+            processed = (dry * (1 - mix)) + (wet * mix);
+            Select.ar(bypass, [processed, dry]);
         });
 
         Ndef(\fx_reverb).set(
             \bypass, fxReverbBypass,
-            \room,   reverbRoom,
+            \decay,  reverbDecay,
             \damp,   reverbDamp,
             \mix,    reverbMix
         );
@@ -319,10 +586,11 @@ s.waitForBoot({
         // ----------------------------------------------------------
         {
             var leftCol, rightCol;
-            var srcButtons = Array.new(4);
             var loadBtn;
             var loadingGuard = false;
             var pad = 10;
+
+            srcButtons = Array.new(4);
 
             w = Window("Shrine Workbench", Rect(40, 40, (colWidth + pad) * 2 + pad, 660));
             w.view.background = Color.gray(0.15);
@@ -396,6 +664,16 @@ s.waitForBoot({
                         }, false);
                     });
                 });
+
+            if(freesoundAvailable, {
+                Button(leftCol, 140@26)
+                    .states_([["Freesound...", Color.black, Color(0.9, 0.6, 0.2)]])
+                    .action_({ openFreesoundSearch.() });
+            }, {
+                Button(leftCol, 140@26)
+                    .states_([["Freesound", Color.gray(0.5), Color.gray(0.3)]])
+                    .enabled_(false);
+            });
 
             // ---- Sample / Granular params ----
             leftCol.decorator.nextLine;
@@ -529,8 +807,8 @@ s.waitForBoot({
                 chorusRate,
                 { |ez| chorusRate = ez.value; Ndef(\fx_chorus).set(\rate, ez.value) });
 
-            makeSlider.(rightCol, "depth (s)",
-                ControlSpec(0.0, 0.01, \lin, 0, chorusDepth),
+            makeSlider.(rightCol, "depth (ms)",
+                ControlSpec(0.0, 10.0, \lin, 0, chorusDepth),
                 chorusDepth,
                 { |ez| chorusDepth = ez.value; Ndef(\fx_chorus).set(\depth, ez.value) });
 
@@ -570,10 +848,10 @@ s.waitForBoot({
             });
 
             rightCol.decorator.nextLine;
-            makeSlider.(rightCol, "room size",
-                ControlSpec(0.0, 1.0, \lin, 0, reverbRoom),
-                reverbRoom,
-                { |ez| reverbRoom = ez.value; Ndef(\fx_reverb).set(\room, ez.value) });
+            makeSlider.(rightCol, "decay (s)",
+                ControlSpec(0.5, 10.0, \exp, 0, reverbDecay),
+                reverbDecay,
+                { |ez| reverbDecay = ez.value; Ndef(\fx_reverb).set(\decay, ez.value) });
 
             makeSlider.(rightCol, "damping",
                 ControlSpec(0.0, 1.0, \lin, 0, reverbDamp),
@@ -608,6 +886,9 @@ s.waitForBoot({
                 .action_({ s.plotTree });
 
             w.onClose_({
+                if(freesoundWin.notNil and: { freesoundWin.isClosed.not }, {
+                    freesoundWin.close;
+                });
                 Ndef(\fx_reverb).clear;
                 Ndef(\fx_phaser).clear;
                 Ndef(\fx_chorus).clear;
@@ -615,6 +896,7 @@ s.waitForBoot({
                 Ndef(\source).clear;
                 buf.free;
                 "Workbench closed. Ndefs cleared.".postln;
+                0.exit;
             });
 
             w.front;
