@@ -1,3 +1,19 @@
+/*
+ * cap-demo: Self-capacitance sensing demo using charge-amp front end.
+ *
+ * Circuit: TLV2372 charge amp with excitation on IN+ (pin 3) via
+ * RC filter (R_exc 10k, C_exc 4.7nF), electrode on IN- (pin 2),
+ * R_f 1M + C_f 10nF feedback.  Output read by ESP32 internal ADC
+ * via I2S DMA on GPIO36.
+ *
+ * Touch increases the electrode's parasitic capacitance, which
+ * increases current through R_f and raises the output amplitude.
+ * Detection is based on stdev of the sampled waveform rising above
+ * an adaptive baseline.
+ *
+ * See Self_Cap_Concept_Node on the BSS wiki for circuit details.
+ */
+
 #include <math.h>
 #include <stdbool.h>
 #include <string.h>
@@ -10,11 +26,11 @@
 
 static const char *TAG = "cap-demo";
 
-/* Excitation signal: 30 kHz square wave on GPIO18 */
+/* Excitation signal: ~30 kHz square wave on GPIO4 → R_exc → pin 3 (IN+ A) */
 #define EXCITE_FREQ_HZ   29777
-#define EXCITE_GPIO      18
+#define EXCITE_GPIO      4
 
-/* ADC input: GPIO36 = ADC1_CHANNEL_0 */
+/* ADC input: GPIO36 (VP) = ADC1_CHANNEL_0 ← pin 1 (OUT A) */
 #define ADC_CHANNEL      ADC1_CHANNEL_0
 
 /* I2S ADC DMA sample rate */
@@ -31,7 +47,7 @@ static const char *TAG = "cap-demo";
  * Adaptive baseline tracking.
  * The baseline follows stdev with a slow EMA (ALPHA_SLOW) when no touch
  * is detected, and freezes during touch.  Touch is detected when stdev
- * drops below baseline by more than TOUCH_THRESHOLD_PCT percent.
+ * rises above baseline by more than TOUCH_THRESHOLD_PCT percent.
  */
 #define ALPHA_SLOW        0.1f
 #define ALPHA_INIT        0.2f
@@ -125,7 +141,6 @@ void app_main(void)
         double sum = 0.0;
         double sum_sq = 0.0;
         int total_samples = 0;
-        int chan_hist[16] = {0};
 
         for (int r = 0; r < READS_PER_WINDOW; r++) {
             size_t bytes_read = 0;
@@ -138,7 +153,6 @@ void app_main(void)
 
             int n_samples = (int)(bytes_read / sizeof(uint16_t));
             for (int i = 0; i < n_samples; i++) {
-                chan_hist[dma_buf[i] >> 12]++;
                 uint16_t val = dma_buf[i] & 0x0FFF;
                 sum += val;
                 sum_sq += (double)val * val;
@@ -159,11 +173,11 @@ void app_main(void)
         float alpha = (sample_count < INIT_SAMPLES) ? ALPHA_INIT : ALPHA_SLOW;
 
         float threshold = baseline * (TOUCH_THRESHOLD_PCT / 100.0f);
-        bool now_touched = (baseline > 0) && (sd < baseline - threshold);
+        bool now_touched = (baseline > 0) && (sd > baseline + threshold);
 
         /*
          * Update baseline only when not touched.  This prevents touch
-         * events from dragging the baseline down, which would desensitize
+         * events from dragging the baseline up, which would desensitize
          * detection.  On release, the baseline resumes slow tracking.
          */
         if (!now_touched) {
@@ -176,7 +190,7 @@ void app_main(void)
             ESP_LOGI(TAG, "touch %s", touched ? "ON" : "OFF");
         }
 
-        float pct = (baseline > 0) ? 100.0f * (baseline - sd) / baseline : 0;
+        float pct = (baseline > 0) ? 100.0f * (sd - baseline) / baseline : 0;
         printf("sd=%.0f mean=%.0f base=%.0f delta=%.1f%% %s\n",
                sd, mean, baseline, pct, now_touched ? "TOUCH" : "");
     }
