@@ -13,6 +13,8 @@ build/
 .pio/
 .pioenvs/
 .piolibdeps/
+sdkconfig.*
+!sdkconfig.defaults
 
 # IDE
 .vscode/.browse.c_cpp.db*
