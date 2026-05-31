@@ -38,6 +38,10 @@ static const char *TAG = "cap-demo";
  * With sample_freq_hz=220000 and 1-bit LEDC at 20 kHz:
  *   actual_fs = 220000 × 9/11 = 180000 Hz
  *   N = 180000 / 20000 = 9 samples per excitation cycle (exact)
+ *
+ * Phase drifts ~6°/s due to the I2S fractional mclk divider (22+8/11).
+ * This is acceptable for cap sensing (magnitude-only). Phase-sensitive
+ * GSR measurement uses the MCP3201 path instead.
  */
 #define EXCITE_FREQ_HZ   20000
 #define EXCITE_GPIO      4
@@ -72,7 +76,7 @@ static adc_continuous_handle_t adc_handle = NULL;
 #ifdef GSR_RX_MODE
 #ifndef ADC_SWEEP_TEST
 /*
- * I/Q demodulation: 9-entry reference tables for one cycle of 20 kHz excitation.
+ * I/Q demodulation: 9-entry reference tables for one excitation cycle.
  * At actual_fs = 180 ksps, one cycle = 9 samples.
  * Entries are cos(2π·k/9) and sin(2π·k/9) for k = 0..8.
  */
