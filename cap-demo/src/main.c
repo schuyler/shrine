@@ -22,6 +22,7 @@
 #include "driver/i2s.h"
 #include "driver/ledc.h"
 #include "driver/adc.h"
+#include "driver/gpio.h"
 #include "esp_log.h"
 
 static const char *TAG = "cap-demo";
@@ -123,9 +124,14 @@ static void init_i2s_adc(void)
 
 void app_main(void)
 {
+#ifdef GSR_RX_MODE
+    ESP_LOGI(TAG, "cap-demo starting (GSR RX mode — excitation disabled)");
+    gpio_set_direction(EXCITE_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(EXCITE_GPIO, 0);
+#else
     ESP_LOGI(TAG, "cap-demo starting");
-
     init_ledc();
+#endif
     init_i2s_adc();
 
     static uint16_t dma_buf[DMA_BUF_LEN];
