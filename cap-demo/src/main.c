@@ -4,7 +4,7 @@
  * Circuit: TLV2372 charge amp with excitation on IN+ (pin 3) via
  * RC filter (R_exc 10k, C_exc 4.7nF), electrode on IN- (pin 2),
  * R_f 1M + C_f 10nF feedback.  Output read by ESP32 internal ADC
- * via I2S DMA on GPIO36.
+ * via ADC continuous mode DMA on GPIO36.
  *
  * Touch increases the electrode's parasitic capacitance, which
  * increases current through R_f and raises the output amplitude.
@@ -19,30 +19,31 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/i2s.h"
+#include "esp_adc/adc_continuous.h"
 #include "driver/ledc.h"
-#include "driver/adc.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 static const char *TAG = "cap-demo";
 
 /* Excitation signal: ~30 kHz square wave on GPIO4 → R_exc → pin 3 (IN+ A) */
-#define EXCITE_FREQ_HZ   29777
+#define EXCITE_FREQ_HZ   30000
 #define EXCITE_GPIO      4
 
-/* ADC input: GPIO36 (VP) = ADC1_CHANNEL_0 ← pin 1 (OUT A) */
-#define ADC_CHANNEL      ADC1_CHANNEL_0
+/* ADC continuous mode DMA configuration */
+#define ADC_SAMPLE_RATE  150000
+#define ADC_FRAME_SIZE   2048   /* bytes; 1024 samples x 2 bytes each */
+#define ADC_POOL_SIZE    8192   /* ring buffer bytes */
 
-/* I2S ADC DMA sample rate */
-#define SAMPLE_RATE      150000
-
-/* DMA buffer sizing */
-#define DMA_BUF_LEN      1024
-#define DMA_BUF_COUNT    8
+/* conv_frame_size must align to DMA granularity (4 bytes), not result size (2 bytes) */
+_Static_assert(ADC_FRAME_SIZE % SOC_ADC_DIGI_DATA_BYTES_PER_CONV == 0,
+               "ADC_FRAME_SIZE must be a multiple of SOC_ADC_DIGI_DATA_BYTES_PER_CONV");
 
 /* Number of DMA reads per measurement window */
+#ifndef GSR_RX_MODE
 #define READS_PER_WINDOW  4
+#endif
 
 /*
  * Adaptive baseline tracking.
@@ -55,6 +56,20 @@ static const char *TAG = "cap-demo";
 #define INIT_SAMPLES      50
 #define TOUCH_THRESHOLD_PCT  5.0f
 
+#ifdef GSR_RX_MODE
+/* I/Q demodulation: 5-entry reference tables for one cycle of ~30 kHz excitation.
+ * At 150 ksps, one cycle = 5 samples. */
+static const float COS_TABLE[5] = {1.0f, 0.3090f, -0.8090f, -0.8090f, 0.3090f};
+static const float SIN_TABLE[5] = {0.0f, 0.9511f, 0.5878f, -0.5878f, -0.9511f};
+
+#define IQ_WINDOW_SIZE   40  /* must be a multiple of 5 */
+_Static_assert(IQ_WINDOW_SIZE % 5 == 0,
+               "IQ_WINDOW_SIZE must be a multiple of 5 (one reference cycle = 5 samples)");
+#define IQ_N_WINDOWS     4
+#define IQ_TOTAL_SAMPLES (IQ_WINDOW_SIZE * IQ_N_WINDOWS)  /* 160 */
+#endif
+
+#ifndef GSR_RX_MODE
 static void init_ledc(void)
 {
     ledc_timer_config_t timer = {
@@ -79,34 +94,33 @@ static void init_ledc(void)
 
     ESP_LOGI(TAG, "LEDC: %d Hz on GPIO%d", EXCITE_FREQ_HZ, EXCITE_GPIO);
 }
+#endif
 
-static void init_i2s_adc(void)
+static adc_continuous_handle_t adc_handle = NULL;
+
+static void init_adc_continuous(void)
 {
-    i2s_config_t i2s_cfg = {
-        .mode                 = I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN,
-        .sample_rate          = SAMPLE_RATE,
-        .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
-        .channel_format       = I2S_CHANNEL_FMT_ONLY_LEFT,
-        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-        .intr_alloc_flags     = 0,
-        .dma_buf_count        = DMA_BUF_COUNT,
-        .dma_buf_len          = DMA_BUF_LEN,
-        /*
-         * use_apll = false: some ESP32 silicon revisions return all-zero
-         * data when APLL is used in ADC-DMA mode.  The APB clock is
-         * sufficient for 150 ksps and is more reliable.
-         */
-        .use_apll             = false,
-        .tx_desc_auto_clear   = false,
-        .fixed_mclk           = 0,
+    adc_continuous_handle_cfg_t handle_cfg = {
+        .max_store_buf_size = ADC_POOL_SIZE,
+        .conv_frame_size    = ADC_FRAME_SIZE,
     };
-    ESP_ERROR_CHECK(i2s_driver_install(I2S_NUM_0, &i2s_cfg, 0, NULL));
+    ESP_ERROR_CHECK(adc_continuous_new_handle(&handle_cfg, &adc_handle));
 
-    ESP_ERROR_CHECK(adc1_config_width(ADC_WIDTH_BIT_12));
-    ESP_ERROR_CHECK(adc1_config_channel_atten(ADC_CHANNEL, ADC_ATTEN_DB_12));
-
-    ESP_ERROR_CHECK(i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_0));
-    ESP_ERROR_CHECK(i2s_adc_enable(I2S_NUM_0));
+    adc_digi_pattern_config_t pattern[1] = {{
+        .atten     = ADC_ATTEN_DB_12,
+        .channel   = ADC_CHANNEL_0,
+        .unit      = ADC_UNIT_1,
+        .bit_width = ADC_BITWIDTH_12,
+    }};
+    adc_continuous_config_t dig_cfg = {
+        .pattern_num    = 1,
+        .adc_pattern    = pattern,
+        .sample_freq_hz = ADC_SAMPLE_RATE,
+        .conv_mode      = ADC_CONV_SINGLE_UNIT_1,
+        .format         = ADC_DIGI_OUTPUT_FORMAT_TYPE1,
+    };
+    ESP_ERROR_CHECK(adc_continuous_config(adc_handle, &dig_cfg));
+    ESP_ERROR_CHECK(adc_continuous_start(adc_handle));
 
     /*
      * The first buffer(s) after enable often contain stale DMA data.
@@ -114,12 +128,14 @@ static void init_i2s_adc(void)
      */
     vTaskDelay(pdMS_TO_TICKS(100));
     {
-        static uint16_t flush_buf[DMA_BUF_LEN];
-        size_t bytes_read = 0;
-        i2s_read(I2S_NUM_0, flush_buf, sizeof(flush_buf), &bytes_read, portMAX_DELAY);
+        static WORD_ALIGNED_ATTR uint8_t flush_buf[ADC_FRAME_SIZE];
+        uint32_t br = 0;
+        if (adc_continuous_read(adc_handle, flush_buf, sizeof(flush_buf), &br, 1000) != ESP_OK) {
+            ESP_LOGW(TAG, "init flush read failed; first window may contain stale data");
+        }
     }
 
-    ESP_LOGI(TAG, "I2S ADC: %d sps, GPIO36 (ADC1_CH0)", SAMPLE_RATE);
+    ESP_LOGI(TAG, "ADC continuous: %d sps, GPIO36 (ADC1_CH0)", ADC_SAMPLE_RATE);
 }
 
 void app_main(void)
@@ -132,10 +148,92 @@ void app_main(void)
     ESP_LOGI(TAG, "cap-demo starting");
     init_ledc();
 #endif
-    init_i2s_adc();
+    init_adc_continuous();
 
-    static uint16_t dma_buf[DMA_BUF_LEN];
+    static WORD_ALIGNED_ATTR uint8_t adc_buf[ADC_FRAME_SIZE];
 
+#ifdef GSR_RX_MODE
+    ESP_LOGI(TAG, "Entering main loop (I/Q demod + stdev)");
+
+    /* Measure true DMA sample rate: burst of reads with no processing */
+    {
+        int64_t t0 = esp_timer_get_time();
+        long total = 0;
+        int failures = 0;
+        for (int r = 0; r < 100; r++) {
+            uint32_t br = 0;
+            esp_err_t err = adc_continuous_read(adc_handle, adc_buf,
+                                                sizeof(adc_buf), &br, 1000);
+            if (err == ESP_OK) {
+                total += (long)(br / SOC_ADC_DIGI_RESULT_BYTES);
+                failures = 0;
+            } else if (++failures >= 3) {
+                ESP_LOGE(TAG, "burst read failed %d times, aborting measurement", failures);
+                break;
+            }
+        }
+        int64_t elapsed = esp_timer_get_time() - t0;
+        if (total > 0) {
+            float fs = (float)total / ((float)elapsed / 1e6f);
+            printf("measured fs=%.0f Hz (%ld samples in %.1f ms)\n",
+                   fs, total, (float)elapsed / 1000.0f);
+        } else {
+            ESP_LOGW(TAG, "burst rate measurement aborted (no samples)");
+        }
+    }
+
+    while (1) {
+        uint32_t ret_num = 0;
+        esp_err_t err = adc_continuous_read(adc_handle, adc_buf,
+                                            sizeof(adc_buf), &ret_num, 1000);
+        if (err != ESP_OK || ret_num == 0) {
+            ESP_LOGE(TAG, "adc_continuous_read: err=%d ret_num=%lu",
+                     err, (unsigned long)ret_num);
+            continue;
+        }
+        int n_samples = (int)(ret_num / SOC_ADC_DIGI_RESULT_BYTES);
+        if (n_samples < IQ_TOTAL_SAMPLES) {
+            ESP_LOGE(TAG, "insufficient samples: %d < %d", n_samples, IQ_TOTAL_SAMPLES);
+            continue;
+        }
+
+        /* Stdev over all samples in this read */
+        double sum = 0.0, sum_sq = 0.0;
+        for (int i = 0; i < n_samples; i++) {
+            uint16_t val = ((adc_digi_output_data_t *)&adc_buf[i * SOC_ADC_DIGI_RESULT_BYTES])->type1.data;
+            sum += val;
+            sum_sq += (double)val * val;
+        }
+        double mean = sum / n_samples;
+        double variance = (sum_sq / n_samples) - (mean * mean);
+        float sd = (float)sqrt(variance > 0 ? variance : 0);
+
+        /* I/Q demodulation over first IQ_TOTAL_SAMPLES samples */
+        float I_avg = 0, Q_avg = 0;
+        for (int w = 0; w < IQ_N_WINDOWS; w++) {
+            float I_sum = 0, Q_sum = 0;
+            for (int i = 0; i < IQ_WINDOW_SIZE; i++) {
+                int idx = w * IQ_WINDOW_SIZE + i;
+                float s = (float)(((adc_digi_output_data_t *)&adc_buf[idx * SOC_ADC_DIGI_RESULT_BYTES])->type1.data) - 2048.0f;
+                I_sum += s * COS_TABLE[i % 5];
+                Q_sum += s * SIN_TABLE[i % 5];
+            }
+            float I = I_sum / IQ_WINDOW_SIZE;
+            float Q = Q_sum / IQ_WINDOW_SIZE;
+            float mag = sqrtf(I * I + Q * Q);
+            float phase = atan2f(Q, I) * 180.0f / (float)M_PI;
+            printf("  w%d: mag=%.1f phase=%.1f\n", w, mag, phase);
+            I_avg += I;
+            Q_avg += Q;
+        }
+        I_avg /= IQ_N_WINDOWS;
+        Q_avg /= IQ_N_WINDOWS;
+        float mag_avg = sqrtf(I_avg * I_avg + Q_avg * Q_avg);
+        float phase_avg = atan2f(Q_avg, I_avg) * 180.0f / (float)M_PI;
+        printf("mag=%.1f phase=%.1f sd=%.0f mean=%.0f\n",
+               mag_avg, phase_avg, sd, mean);
+    }
+#else
     float baseline = 0.0f;
     int sample_count = 0;
     bool touched = false;
@@ -149,17 +247,18 @@ void app_main(void)
         int total_samples = 0;
 
         for (int r = 0; r < READS_PER_WINDOW; r++) {
-            size_t bytes_read = 0;
-            esp_err_t err = i2s_read(I2S_NUM_0, dma_buf, sizeof(dma_buf),
-                                     &bytes_read, portMAX_DELAY);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "i2s_read error: %d", err);
+            uint32_t ret_num = 0;
+            esp_err_t err = adc_continuous_read(adc_handle, adc_buf,
+                                                sizeof(adc_buf), &ret_num, 1000);
+            if (err != ESP_OK || ret_num == 0) {
+                ESP_LOGE(TAG, "adc_continuous_read: err=%d ret_num=%lu",
+                         err, (unsigned long)ret_num);
                 continue;
             }
 
-            int n_samples = (int)(bytes_read / sizeof(uint16_t));
+            int n_samples = (int)(ret_num / SOC_ADC_DIGI_RESULT_BYTES);
             for (int i = 0; i < n_samples; i++) {
-                uint16_t val = dma_buf[i] & 0x0FFF;
+                uint16_t val = ((adc_digi_output_data_t *)&adc_buf[i * SOC_ADC_DIGI_RESULT_BYTES])->type1.data;
                 sum += val;
                 sum_sq += (double)val * val;
                 total_samples++;
@@ -200,4 +299,5 @@ void app_main(void)
         printf("sd=%.0f mean=%.0f base=%.0f delta=%.1f%% %s\n",
                sd, mean, baseline, pct, now_touched ? "TOUCH" : "");
     }
+#endif
 }
