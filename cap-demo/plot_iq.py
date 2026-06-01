@@ -34,7 +34,8 @@ BAUD = 115200
 DECIMATE_N = 4       # keep every Nth serial line (~44 Hz from ~176 Hz firmware)
 DISPLAY_SECONDS = 10 # visible time window
 HISTORY = 1000       # sample buffer (oversized to ensure 10 s coverage)
-EMA_TAU = 0.3        # EMA time constant in seconds
+EMA_TAU = 0.3        # EMA time constant in seconds (signal smoothing)
+DRIFT_TAU = 5.0      # EMA time constant for phase drift removal (high-pass)
 INTERP_FACTOR = 3    # spline densification for rounded peaks
 
 PAT = re.compile(
@@ -59,8 +60,11 @@ def main():
 
     # EMA state — initialized on first sample
     ema_mag = None
-    ema_phase = None
+    ema_phase_cos = None
+    ema_phase_sin = None
     ema_sd = None
+    phase_unwrapped_prev = None  # previous unwrapped phase for causal unwrap
+    phase_drift_ema = None       # slow EMA for drift removal (high-pass)
 
     fig, (ax_mag, ax_phase, ax_sd) = plt.subplots(3, 1, figsize=(10, 7), sharex=True)
     fig.suptitle("I/Q Demodulation — GSR RX", fontsize=12)
@@ -81,7 +85,7 @@ def main():
     y_ranges = {ax: [float('inf'), float('-inf')] for ax in (ax_mag, ax_phase, ax_sd)}
 
     def update(_frame):
-        nonlocal sample_count, last_t, ema_mag, ema_phase, ema_sd
+        nonlocal sample_count, last_t, ema_mag, ema_phase_cos, ema_phase_sin, ema_sd, phase_unwrapped_prev, phase_drift_ema
         while port.in_waiting:
             try:
                 line = port.readline().decode("ascii", errors="replace").strip()
@@ -104,18 +108,42 @@ def main():
             last_t = t
             alpha = min(1.0, dt / (EMA_TAU + dt)) if dt > 0 else 1.0
 
+            # Filter phase in cartesian form to avoid wrap discontinuity
+            raw_phase_rad = np.radians(raw_phase)
+            raw_cos = np.cos(raw_phase_rad)
+            raw_sin = np.sin(raw_phase_rad)
+
             if ema_mag is None:
                 ema_mag = raw_mag
-                ema_phase = raw_phase
+                ema_phase_cos = raw_cos
+                ema_phase_sin = raw_sin
                 ema_sd = raw_sd
             else:
                 ema_mag += alpha * (raw_mag - ema_mag)
-                ema_phase += alpha * (raw_phase - ema_phase)
+                ema_phase_cos += alpha * (raw_cos - ema_phase_cos)
+                ema_phase_sin += alpha * (raw_sin - ema_phase_sin)
                 ema_sd += alpha * (raw_sd - ema_sd)
+
+            # Causal phase unwrap + high-pass drift removal
+            phase_deg = np.degrees(np.arctan2(ema_phase_sin, ema_phase_cos))
+            if phase_unwrapped_prev is None:
+                phase_unwrapped_prev = phase_deg
+            else:
+                # Manual unwrap: add/subtract 360° to minimize jump from previous
+                diff = phase_deg - phase_unwrapped_prev
+                diff -= round(diff / 360.0) * 360.0
+                phase_unwrapped_prev += diff
+
+            # Slow EMA tracks the drift; subtract it for high-pass
+            drift_alpha = min(1.0, dt / (DRIFT_TAU + dt)) if dt > 0 else 1.0
+            if phase_drift_ema is None:
+                phase_drift_ema = phase_unwrapped_prev
+            else:
+                phase_drift_ema += drift_alpha * (phase_unwrapped_prev - phase_drift_ema)
 
             ts.append(t)
             mags.append(ema_mag)
-            phases.append(ema_phase)
+            phases.append(phase_unwrapped_prev - phase_drift_ema)
             sds.append(ema_sd)
 
         if len(ts) < 2:
@@ -130,30 +158,27 @@ def main():
         mag_arr = np.array(list(mags))[mask]
         sd_arr = np.array(list(sds))[mask]
 
-        # Unwrap phase and remove linear drift
-        phase_unwrapped = np.degrees(np.unwrap(np.radians(list(phases))))[mask]
-        if len(t_arr) >= 2:
-            # Linear fit to remove ~6°/s clock drift
-            coeffs = np.polyfit(t_arr, phase_unwrapped, 1)
-            phase_detrended = phase_unwrapped - np.polyval(coeffs, t_arr)
-        else:
-            phase_detrended = phase_unwrapped
+        # Phase is already drift-corrected (causal high-pass in per-sample loop)
+        phase_arr = np.array(list(phases))[mask]
 
         # Cubic spline to round off peaks
         t_dense = np.linspace(t_arr[0], t_arr[-1], len(t_arr) * INTERP_FACTOR)
         k = min(3, len(t_arr) - 1)
-        for line_obj, arr in [(line_mag, mag_arr), (line_phase, phase_detrended), (line_sd, sd_arr)]:
+        for line_obj, arr in [(line_mag, mag_arr), (line_phase, phase_arr), (line_sd, sd_arr)]:
             spline = make_interp_spline(t_arr, arr, k=k)
             line_obj.set_data(t_dense, spline(t_dense))
 
-        for ax, arr in [(ax_mag, mag_arr), (ax_phase, phase_detrended), (ax_sd, sd_arr)]:
+        for ax, arr in [(ax_mag, mag_arr), (ax_phase, phase_arr), (ax_sd, sd_arr)]:
             ax.set_xlim(t_arr[0], t_arr[-1])
-            lo, hi = y_ranges[ax]
-            lo = min(lo, arr.min())
-            hi = max(hi, arr.max())
-            y_ranges[ax] = [lo, hi]
-            margin = (hi - lo) * 0.05 if hi > lo else 1.0
-            ax.set_ylim(lo - margin, hi + margin)
+            if ax is ax_phase:
+                ax.set_ylim(-200, 200)
+            else:
+                lo, hi = y_ranges[ax]
+                lo = min(lo, arr.min())
+                hi = max(hi, arr.max())
+                y_ranges[ax] = [lo, hi]
+                margin = (hi - lo) * 0.05 if hi > lo else 1.0
+                ax.set_ylim(lo - margin, hi + margin)
 
         return line_mag, line_phase, line_sd
 
