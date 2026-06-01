@@ -1,5 +1,5 @@
 key,type,encoding,value
-namespace,namespace,,shrine
+shrine,namespace,,
 node_id,data,u8,1
 leader,data,u8,0
 wifi_ssid,data,string,shrine-net

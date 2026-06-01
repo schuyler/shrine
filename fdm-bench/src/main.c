@@ -223,8 +223,10 @@ void app_main(void)
 {
     /* --- NVS: read node_id --- */
     esp_err_t nvs_err = nvs_flash_init();
+    ESP_LOGI(TAG, "nvs_flash_init: %s (0x%x)", esp_err_to_name(nvs_err), nvs_err);
     if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES ||
         nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW(TAG, "NVS erase triggered by init error — provisioned data lost");
         ESP_ERROR_CHECK(nvs_flash_erase());
         nvs_err = nvs_flash_init();
     }
@@ -233,10 +235,12 @@ void app_main(void)
     uint8_t node_id = 0;
     nvs_handle_t nvs;
     esp_err_t err = nvs_open("shrine", NVS_READONLY, &nvs);
+    ESP_LOGI(TAG, "nvs_open('shrine'): %s (0x%x)", esp_err_to_name(err), err);
     if (err == ESP_OK) {
         err = nvs_get_u8(nvs, "node_id", &node_id);
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "node_id not found in NVS, defaulting to 0");
+            ESP_LOGW(TAG, "node_id not found in NVS: %s, defaulting to 0",
+                     esp_err_to_name(err));
             node_id = 0;
         }
         nvs_close(nvs);

@@ -12,4 +12,6 @@ dependencies = [
     "pyyaml",
     "requests",
     "sounddevice",
+    "esptool",
+    "esp-idf-nvs-partition-gen",
 ]
