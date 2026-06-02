@@ -116,15 +116,19 @@ def run_serial_checks(monitor):
     """
     results = []
 
-    # 1. NVS loaded — matches main.c: ESP_LOGI(TAG, "node_id=...")
+    # 1. NVS loaded with FDM config — main.c logs node_id, base_k, step_k, window_n.
+    #    TDM firmware logs "node_id=%u, leader=%d" which does NOT contain "base_k=",
+    #    so this check fails against TDM and passes against FDM.
     timeout = 5
-    line = monitor.wait_for(r"main: node_id=", timeout)
+    line = monitor.wait_for(r"main: node_id=\d+.*base_k=\d+", timeout)
     if line is None:
-        results.append(("NVS loaded", False, f"not seen within {timeout}s"))
+        results.append(("NVS loaded (FDM config)", False, f"not seen within {timeout}s"))
     else:
-        results.append(("NVS loaded", True, line))
+        results.append(("NVS loaded (FDM config)", True, line))
 
     # 2. Calibration — matches sensing_task.c: ESP_LOGI(TAG, "calibration: ... sample_rate=...")
+    #    This check is preserved; both TDM and FDM perform calibration and log sample_rate.
+    #    The additional sub-check for excit_freq is done separately (check 3 below).
     timeout = 5
     line = monitor.wait_for(r"sensing:.*sample_rate=", timeout)
     if line is None:
@@ -140,7 +144,24 @@ def run_serial_checks(monitor):
         else:
             results.append(("Calibration", False, f"could not extract sample_rate from: {line}"))
 
-    # 3. WiFi connected — matches network_task.c: ESP_LOGI(TAG, "got IP: ...")
+    # 3. Carrier bin assigned — FDM sensing_task logs k_self and excit_freq after startup.
+    #    TDM firmware has no such message; this check fails against TDM.
+    timeout = 5
+    line = monitor.wait_for(r"sensing:.*k_self=\d+.*excit_freq=\d+", timeout)
+    if line is None:
+        results.append(("Carrier assigned", False, f"not seen within {timeout}s"))
+    else:
+        match = re.search(r"excit_freq=(\d+)", line)
+        if match:
+            freq = int(match.group(1))
+            if freq > 0:
+                results.append(("Carrier assigned", True, line))
+            else:
+                results.append(("Carrier assigned", False, f"excit_freq={freq} is not > 0"))
+        else:
+            results.append(("Carrier assigned", False, f"could not extract excit_freq from: {line}"))
+
+    # 4. WiFi connected — matches network_task.c: ESP_LOGI(TAG, "got IP: ...")
     timeout = 15
     line = monitor.wait_for(r"network: got IP:", timeout)
     if line is None:
@@ -148,7 +169,7 @@ def run_serial_checks(monitor):
     else:
         results.append(("WiFi connected", True, line))
 
-    # 4. Tasks started — matches main.c: ESP_LOGI(TAG, "all tasks started")
+    # 5. Tasks started — matches main.c: ESP_LOGI(TAG, "all tasks started")
     timeout = 5
     line = monitor.wait_for(r"main: all tasks started", timeout)
     if line is None:
@@ -183,14 +204,17 @@ def run_osc_checks(listener):
     else:
         results.append(("Address format", False, f"bad addresses: {bad_addrs[:5]}"))
 
-    # 3. Argument count
-    wrong_arg_count = [(addr, len(args)) for addr, args in packets if len(args) != 7]
+    # 3. Argument count — FDM sends 5 floats (self_stdev, self_carrier_mag,
+    #    gsr_mag[0..2]).  TDM sends 7 floats, so this check fails against TDM.
+    wrong_arg_count = [(addr, len(args)) for addr, args in packets if len(args) != 5]
     if not wrong_arg_count:
-        results.append(("Argument count", True, "all packets have 7 args"))
+        results.append(("Argument count", True, "all packets have 5 args"))
     else:
-        results.append(("Argument count", False, f"{len(wrong_arg_count)} packets with wrong arg count"))
+        results.append(("Argument count", False, f"{len(wrong_arg_count)} packets with wrong arg count (expected 5)"))
 
-    # 4. No NaN in self_cap_mag (first float arg)
+    # 4. No NaN in self_stdev (first float arg, index 0).
+    #    In FDM the first arg is self_stdev; in TDM it was self_cap_mag.
+    #    Label updated to reflect the FDM field name.
     nan_packets = []
     for addr, args in packets:
         try:
@@ -199,9 +223,22 @@ def run_osc_checks(listener):
         except (TypeError, ValueError):
             nan_packets.append(addr)
     if not nan_packets:
-        results.append(("No NaN", True, "no NaN values in self_cap_mag"))
+        results.append(("No NaN", True, "no NaN values in self_stdev"))
     else:
-        results.append(("No NaN", False, f"{len(nan_packets)} packets with NaN self_cap_mag"))
+        results.append(("No NaN", False, f"{len(nan_packets)} packets with NaN self_stdev"))
+
+    # 5. No NaN in self_carrier_mag (second float arg, index 1).
+    nan_packets_carrier = []
+    for addr, args in packets:
+        try:
+            if len(args) >= 2 and math.isnan(float(args[1])):
+                nan_packets_carrier.append(addr)
+        except (TypeError, ValueError):
+            nan_packets_carrier.append(addr)
+    if not nan_packets_carrier:
+        results.append(("No NaN carrier", True, "no NaN values in self_carrier_mag"))
+    else:
+        results.append(("No NaN carrier", False, f"{len(nan_packets_carrier)} packets with NaN self_carrier_mag"))
 
     return results
 

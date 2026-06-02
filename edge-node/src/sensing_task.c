@@ -1,17 +1,23 @@
+/* sensing_task.c — FDM capacitive sensing loop.
+ *
+ * Acquires the SPI bus, calibrates sample rate, starts LEDC excitation at
+ * this node's carrier frequency, then runs a continuous demodulation loop:
+ * collect one window of ADC samples, compute self-stdev and I/Q magnitudes
+ * at all 4 carrier bins, post a scan_result_t to g_result_queue for
+ * network_task.
+ */
+
 #include "sensing_task.h"
 #include "config.h"
-#include "sync.h"
-#include "tdm.h"
 #include "excitation.h"
 #include "adc_read.h"
+#include "fdm_math.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
-#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "esp_rom_sys.h"   /* esp_rom_delay_us */
-#include <math.h>          /* nanf */
+#include <math.h>   /* cosf, sinf, sqrtf */
 
 /* g_result_queue is declared in globals.h and defined in main.c */
 #include "globals.h"
@@ -25,18 +31,17 @@ static const char *TAG = "sensing";
 #define CALIB_SAMPLES 500
 
 /* -------------------------------------------------------------------------
- * Calibration: measure actual ADC sample rate and derive excitation freq.
+ * Calibration: measure actual ADC sample rate.
+ * Called inside an already-acquired SPI bus — no internal acquire/release.
  * -------------------------------------------------------------------------*/
 
-static uint32_t calibrate_sample_rate(uint32_t *out_excit_freq)
+static uint32_t calibrate_sample_rate(void)
 {
     uint16_t buf[CALIB_SAMPLES];
 
-    adc_acquire();
     int64_t t0 = esp_timer_get_time();   /* µs */
     bool calib_ok = adc_read_into_buffer(buf, CALIB_SAMPLES);
     int64_t t1 = esp_timer_get_time();
-    adc_release();
 
     if (!calib_ok) {
         ESP_LOGW(TAG, "calibration: SPI errors during sampling — "
@@ -45,21 +50,17 @@ static uint32_t calibrate_sample_rate(uint32_t *out_excit_freq)
 
     int64_t elapsed_us = t1 - t0;
     if (elapsed_us <= 0) {
-        ESP_LOGW(TAG, "calibration elapsed_us=%lld, using default 10000 Hz",
+        ESP_LOGW(TAG, "calibration elapsed_us=%lld, using default 100000 Hz",
                  elapsed_us);
-        *out_excit_freq = 10000 / SAMPLES_PER_CYCLE;
-        return 10000;
+        return 100000;
     }
 
     /* samples_per_second = CALIB_SAMPLES / (elapsed_us / 1e6) */
     uint32_t sample_rate = (uint32_t)(((int64_t)CALIB_SAMPLES * 1000000LL)
                                       / elapsed_us);
-    *out_excit_freq = sample_rate / SAMPLES_PER_CYCLE;
 
-    ESP_LOGI(TAG,
-             "calibration: %d samples in %lld µs → sample_rate=%lu Hz, "
-             "excit_freq=%lu Hz",
-             CALIB_SAMPLES, elapsed_us, sample_rate, *out_excit_freq);
+    ESP_LOGI(TAG, "calibration: %d samples in %lld µs → sample_rate=%lu Hz",
+             CALIB_SAMPLES, elapsed_us, sample_rate);
 
     return sample_rate;
 }
@@ -72,123 +73,81 @@ void sensing_task(void *param)
 {
     node_config_t *cfg = (node_config_t *)param;
 
-    ESP_LOGI(TAG, "starting on node %u (%s)",
-             cfg->node_id, cfg->is_leader ? "leader" : "follower");
+    ESP_LOGI(TAG, "starting on node %u", cfg->node_id);
 
-    /* --- Startup: calibrate sample rate --------------------------------- */
-    uint32_t excit_freq;
-    uint32_t sample_rate = calibrate_sample_rate(&excit_freq);
+    /* --- Startup: acquire SPI bus for entire run ----------------------- */
+    adc_acquire();
 
-    /* --- Startup: precompute GSR mapping -------------------------------- */
-    const tdm_slot_t *schedule = tdm_get_schedule(cfg->standalone);
-    int n_slots = tdm_get_slot_count(cfg->standalone);
-    tdm_init_gsr_mapping(cfg->node_id, schedule, n_slots);
+    /* --- Startup: calibrate sample rate (runs inside acquired bus) ----- */
+    uint32_t sample_rate = calibrate_sample_rate();
 
-    if (cfg->standalone) {
-        ESP_LOGI(TAG, "standalone mode: %d slots", n_slots);
+    /* --- Startup: clamp window_n to static buffer size ----------------- */
+    uint16_t N = cfg->window_n;
+    if (N > WINDOW_N_DEFAULT) {
+        ESP_LOGW(TAG, "window_n=%u clamped to WINDOW_N_DEFAULT=%u",
+                 N, WINDOW_N_DEFAULT);
+        N = WINDOW_N_DEFAULT;
     }
 
-    /* Buffer large enough for one slot's worth of samples.
-     * At ~100 kHz sample rate and 750 µs integration window: ~75 samples.
-     * 256 gives comfortable headroom. */
-    uint16_t sample_buf[256];
+    /* --- Startup: compute this node's carrier bin and excitation freq -- */
+    uint16_t k_self = cfg->base_k + cfg->node_id * cfg->step_k;
+    uint32_t f_exc  = (uint32_t)((uint64_t)k_self * sample_rate / N);
+
+    ESP_LOGI(TAG, "node_id=%u k_self=%u sample_rate=%lu f_exc=%lu Hz N=%u",
+             cfg->node_id, k_self, sample_rate, f_exc, N);
+
+    excitation_start(f_exc);
+
+    /* --- Startup: precompute NCO step phasors for all 4 carriers ------- */
+    float nco_cos_step[NUM_NODES];
+    float nco_sin_step[NUM_NODES];
+    for (int j = 0; j < NUM_NODES; j++) {
+        uint16_t k = cfg->base_k + (uint16_t)j * cfg->step_k;
+        float angle = 2.0f * (float)M_PI * k / N;
+        nco_cos_step[j] =  cosf(angle);
+        nco_sin_step[j] = -sinf(angle);  /* negative: e^{-jωn} DFT convention */
+    }
+
+    /* --- Startup: fill gsr_node ordering ------------------------------- */
+    scan_result_t result;
+    fdm_gsr_ordering(cfg->node_id, NUM_NODES, result.gsr_node);
+    result.node_id = cfg->node_id;
+
+    /* Static sample buffer (not stack-allocated) */
+    static uint16_t buf[WINDOW_N_DEFAULT];
 
     /* -------------------------------------------------------------------- */
     /* Main sensing loop                                                     */
     /* -------------------------------------------------------------------- */
     while (1) {
-        /* Wait for the frame-sync semaphore. */
-        if (xSemaphoreTake(g_sync_sem,
-                           pdMS_TO_TICKS(SYNC_TIMEOUT_MS)) != pdTRUE) {
-            ESP_LOGW(TAG, "sync timeout — waiting for next frame");
+        /* Fill one complete window */
+        bool ok = adc_read_into_buffer(buf, N);
+        if (!ok) {
+            ESP_LOGW(TAG, "adc_read_into_buffer failed — skipping window");
             continue;
         }
 
-        scan_result_t result = { 0 };
+        /* Stdev (DC-removed, self-presence metric) */
+        result.self_stdev = fdm_stdev(buf, N);
 
-        /* ---------------------------------------------------------------- */
-        /* Iterate over all TDM slots                                       */
-        /* ---------------------------------------------------------------- */
-        for (int slot = 0; slot < n_slots; slot++) {
-            const tdm_slot_t *s = &schedule[slot];
+        /* I/Q demodulation at all 4 carriers */
+        float mag[NUM_NODES];
+        for (int c = 0; c < NUM_NODES; c++) {
+            mag[c] = fdm_demod_magnitude(buf, N, nco_cos_step[c], nco_sin_step[c]);
+        }
 
-            bool am_tx = (s->tx_node == cfg->node_id);
-            bool am_rx = (s->rx_node == cfg->node_id);
+        /* Extract self-carrier magnitude */
+        result.self_carrier_mag = mag[cfg->node_id];
 
-            int64_t slot_start = esp_timer_get_time();
+        /* Assign GSR magnitudes in gsr_node order */
+        for (int offset = 1; offset <= 3; offset++) {
+            int j = (cfg->node_id + offset) % NUM_NODES;
+            result.gsr_mag[offset - 1] = mag[j];
+        }
 
-            /* ---- TX role ----------------------------------------------- */
-            if (am_tx) {
-                excitation_start(excit_freq);
-            }
-
-            /* ---- RX role ----------------------------------------------- */
-            if (am_rx) {
-                /* Let the excitation settle before integrating. */
-                esp_rom_delay_us(SETTLE_US);
-
-                /* Compute how many samples fit in the integration window at
-                 * the calibrated rate.  Clamp to buffer size. */
-                int n_samples = (int)(((uint64_t)sample_rate * INTEGRATE_US)
-                                      / 1000000ULL);
-                if (n_samples < 1)  n_samples = 1;
-                if (n_samples > (int)(sizeof(sample_buf) / sizeof(sample_buf[0])))
-                    n_samples = (int)(sizeof(sample_buf) / sizeof(sample_buf[0]));
-
-                adc_acquire();
-                bool adc_ok = adc_read_into_buffer(sample_buf, n_samples);
-                adc_release();
-
-                if (!adc_ok) {
-                    /* SPI error: record NaN and skip demodulation. */
-                    if (!s->is_gsr) {
-                        result.self_cap_mag = nanf("");
-                    } else {
-                        int gsr_idx = tdm_gsr_result_index((uint8_t)slot);
-                        if (gsr_idx >= 0 && gsr_idx < 3) {
-                            result.gsr_mag[gsr_idx]   = nanf("");
-                            result.gsr_phase[gsr_idx] = nanf("");
-                        }
-                    }
-                } else {
-                    float mag, phase;
-                    tdm_demod_iq(sample_buf, n_samples, &mag, &phase);
-
-                    if (!s->is_gsr) {
-                        /* Self-cap slot: tx == rx == node_id */
-                        result.self_cap_mag = mag;
-                    } else {
-                        int gsr_idx = tdm_gsr_result_index((uint8_t)slot);
-                        if (gsr_idx >= 0 && gsr_idx < 3) {
-                            result.gsr_mag[gsr_idx]   = mag;
-                            result.gsr_phase[gsr_idx] = phase;
-                        }
-                    }
-                }
-            }
-
-            /* ---- Pad remainder of slot to TDM_SLOT_US ----------------- */
-            /* Must pad BEFORE stopping excitation so that a remote RX node
-             * (GSR TX-only case) sees excitation for the full slot duration.
-             * In the self-cap case (am_tx && am_rx) this node is both TX and
-             * RX, so RX work is already done before we reach this point —
-             * padding then stopping is still correct.  In the idle case
-             * (!am_tx && !am_rx) neither branch runs, so we just pad. */
-            int64_t elapsed = esp_timer_get_time() - slot_start;
-            int64_t remaining = (int64_t)TDM_SLOT_US - elapsed;
-            if (remaining > 0) {
-                esp_rom_delay_us((uint32_t)remaining);
-            }
-
-            /* ---- Slot-end housekeeping --------------------------------- */
-            if (am_tx) {
-                excitation_stop();
-            }
-        } /* for each slot */
-
-        /* Post result to the network task (non-blocking: drop if full). */
+        /* Post result to the network task (non-blocking: drop if full) */
         if (xQueueSend(g_result_queue, &result, 0) != pdTRUE) {
-            ESP_LOGD(TAG, "result queue full — frame dropped");
+            ESP_LOGD(TAG, "result queue full — window dropped");
         }
     } /* while(1) */
 }

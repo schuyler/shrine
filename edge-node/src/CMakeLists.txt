@@ -3,8 +3,7 @@ idf_component_register(
         "nvs_config.c"
         "excitation.c"
         "adc_read.c"
-        "sync.c"
-        "tdm.c"
+        "fdm_math.c"
         "sensing_task.c"
         "network_task.c"
         "main.c"
@@ -17,6 +16,5 @@ idf_component_register(
         esp_event
         lwip
         esp_timer
-        esp_rom
         tinyosc
 )

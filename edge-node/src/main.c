@@ -1,10 +1,15 @@
+/* main.c — FDM edge-node firmware entry point.
+ *
+ * Initializes NVS, loads node_config_t, initializes excitation and ADC drivers,
+ * creates g_result_queue, then launches network_task (Core 0) and
+ * sensing_task (Core 1).
+ */
+
 #include "config.h"
 #include "globals.h"
 #include "nvs_config.h"
 #include "excitation.h"
 #include "adc_read.h"
-#include "sync.h"
-#include "tdm.h"
 #include "sensing_task.h"
 #include "network_task.h"
 
@@ -40,12 +45,9 @@ void app_main(void)
                  esp_err_to_name(ret));
         esp_restart();
     }
-    ESP_LOGI(TAG, "node_id=%u, leader=%d, ssid=%s, osc=%s:%u",
-             s_config.node_id, s_config.is_leader,
+    ESP_LOGI(TAG, "node_id=%u base_k=%u step_k=%u window_n=%u ssid=%s osc=%s:%u",
+             s_config.node_id, s_config.base_k, s_config.step_k, s_config.window_n,
              s_config.wifi_ssid, s_config.osc_host, s_config.osc_port);
-    if (s_config.standalone) {
-        ESP_LOGI(TAG, "standalone mode enabled");
-    }
 
     /* 3. Excitation driver */
     ESP_ERROR_CHECK(excitation_init());
@@ -53,17 +55,14 @@ void app_main(void)
     /* 4. ADC / SPI driver */
     ESP_ERROR_CHECK(adc_init());
 
-    /* 5. Sync subsystem */
-    ESP_ERROR_CHECK(sync_init(s_config.is_leader));
-
-    /* 6. Result queue */
+    /* 5. Result queue */
     g_result_queue = xQueueCreate(RESULT_QUEUE_DEPTH, sizeof(scan_result_t));
     if (g_result_queue == NULL) {
         ESP_LOGE(TAG, "failed to create result queue — restarting");
         esp_restart();
     }
 
-    /* 7. Network task (Core 0) */
+    /* 6. Network task (Core 0) */
     BaseType_t task_ret = xTaskCreatePinnedToCore(
         network_task,
         "network",
@@ -77,7 +76,7 @@ void app_main(void)
         esp_restart();
     }
 
-    /* 8. Sensing task (Core 1) */
+    /* 7. Sensing task (Core 1) */
     task_ret = xTaskCreatePinnedToCore(
         sensing_task,
         "sensing",

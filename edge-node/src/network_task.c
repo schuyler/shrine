@@ -128,7 +128,7 @@ static esp_err_t wifi_init(const node_config_t *cfg)
  * OSC send
  * -------------------------------------------------------------------------*/
 
-/* Generous buffer: address + type tag + 7 floats, each padded to 4 bytes. */
+/* Generous buffer: address + type tag + 5 floats, each padded to 4 bytes. */
 #define OSC_BUF_SIZE 128
 
 static void send_osc(int sock, const struct sockaddr_in *dest,
@@ -138,14 +138,12 @@ static void send_osc(int sock, const struct sockaddr_in *dest,
     snprintf(addr, sizeof(addr), "/shrine/node/%u", cfg->node_id);
 
     char buf[OSC_BUF_SIZE];
-    int  len = tosc_writeMessage(buf, sizeof(buf), addr, "fffffff",
-                                 result->self_cap_mag,
+    int  len = tosc_writeMessage(buf, sizeof(buf), addr, "fffff",
+                                 result->self_stdev,
+                                 result->self_carrier_mag,
                                  result->gsr_mag[0],
                                  result->gsr_mag[1],
-                                 result->gsr_mag[2],
-                                 result->gsr_phase[0],
-                                 result->gsr_phase[1],
-                                 result->gsr_phase[2]);
+                                 result->gsr_mag[2]);
     if (len < 0) {
         ESP_LOGD(TAG, "tosc_writeMessage: buffer too small");
         return;

@@ -2,7 +2,6 @@
 #define CONFIG_H
 
 #include <stdint.h>
-#include <stdbool.h>
 
 /* ---------------------------------------------------------------------------
  * Pin definitions
@@ -12,19 +11,16 @@
 #define PIN_SPI_CLK        12   /* SPI2_HOST clock */
 #define PIN_SPI_MISO       13   /* MCP3201 D_out */
 #define PIN_SPI_CS         10   /* Software CS */
-#define PIN_SYNC            5   /* Sync bus (leader: output, follower: input) */
 
 /* ---------------------------------------------------------------------------
- * TDM / frame timing
+ * FDM window and carrier parameters
  * -------------------------------------------------------------------------*/
 
-#define TDM_SLOTS          10
-#define TDM_SLOT_US      1000   /* 1 ms per slot */
-#define TDM_FRAME_MS       10   /* 10 ms total frame */
-#define SETTLE_US         250
-#define INTEGRATE_US      750
-#define SAMPLES_PER_CYCLE    5
-#define SYNC_TIMEOUT_MS    15
+#define WINDOW_N_DEFAULT    1800    /* samples per demod window */
+#define BASE_K_DEFAULT       180    /* DFT bin for node 0 */
+#define STEP_K_DEFAULT        20    /* bin spacing between nodes */
+#define NUM_NODES               4
+#define NCO_RENORM_INTERVAL    64   /* informational — fdm_math.c hardcodes this */
 
 /* ---------------------------------------------------------------------------
  * SPI
@@ -38,7 +34,7 @@
 
 #define SENSING_TASK_CORE     1
 #define SENSING_TASK_PRIO    20
-#define SENSING_TASK_STACK 4096
+#define SENSING_TASK_STACK 4096  /* sample buffer is static, not stack-allocated */
 #define NETWORK_TASK_CORE     0
 #define NETWORK_TASK_PRIO     5
 #define NETWORK_TASK_STACK 8192
@@ -50,18 +46,21 @@
 
 typedef struct {
     uint8_t  node_id;
-    bool     is_leader;
-    bool     standalone;
     char     wifi_ssid[33];
     char     wifi_pass[65];
     char     osc_host[16];
     uint16_t osc_port;
+    uint16_t base_k;        /* DFT bin for node 0 (NVS optional, default 180) */
+    uint16_t step_k;        /* bin spacing (NVS optional, default 20) */
+    uint16_t window_n;      /* samples per window (NVS optional, default 1800) */
 } node_config_t;
 
 typedef struct {
-    float self_cap_mag;
-    float gsr_mag[3];
-    float gsr_phase[3];
+    float   self_stdev;         /* stdev of DC-removed window (self-presence) */
+    float   self_carrier_mag;   /* I/Q magnitude at this node's own carrier */
+    float   gsr_mag[3];         /* I/Q magnitude at 3 other carriers */
+    uint8_t gsr_node[3];        /* node IDs corresponding to gsr_mag[] */
+    uint8_t node_id;            /* this node's ID (for network_task) */
 } scan_result_t;
 
 #endif /* CONFIG_H */

@@ -4,17 +4,17 @@ CFLAGS  = -Wall -Wextra -std=c99 \
           -I../components/tinyosc \
           -I stubs
 
-.PHONY: all test_tdm test_tinyosc clean
+.PHONY: all test_tinyosc test_fdm_math clean
 
-all: test_tdm test_tinyosc
-
-test_tdm: test_tdm.c ../src/tdm.c
-	$(CC) $(CFLAGS) -o $@ $^ -lm
-	./$@
+all: test_tinyosc test_fdm_math
 
 test_tinyosc: test_tinyosc.c ../components/tinyosc/tinyosc.c
 	$(CC) $(CFLAGS) -o $@ $^
 	./$@
 
+test_fdm_math: test_fdm_math.c ../src/fdm_math.c
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+	./$@
+
 clean:
-	rm -f test_tdm test_tinyosc
+	rm -f test_tinyosc test_fdm_math
