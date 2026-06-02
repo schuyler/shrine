@@ -97,10 +97,9 @@ class SignalChannel:
 # Phase definitions for the creative arc scenario
 # ---------------------------------------------------------------------------
 
-# Each phase is: (name, duration_seconds, cap_targets, gsr_targets, gsr_phases)
-# cap_targets: list of 4 floats indexed [pad1, pad2, pad3, pad4]
-# gsr_targets: dict keyed by pair tuple, values are magnitudes
-# gsr_phase_targets: dict keyed by pair tuple, values are phase in radians
+# Each phase is: (name, duration_seconds, cap, gsr_mag)
+# cap: list of 4 floats indexed [pad1, pad2, pad3, pad4]
+# gsr_mag: dict keyed by pair tuple, values are magnitudes [0, 1]
 
 ARC_PHASES = [
     {
@@ -108,14 +107,12 @@ ARC_PHASES = [
         "duration": 5.0,
         "cap": [0.0, 0.0, 0.0, 0.0],
         "gsr_mag": {p: 0.0 for p in GSR_PAIRS},
-        "gsr_phase": {p: 0.0 for p in GSR_PAIRS},
     },
     {
         "name": "Solo",
         "duration": 10.0,
         "cap": [0.7, 0.0, 0.0, 0.0],
         "gsr_mag": {p: 0.0 for p in GSR_PAIRS},
-        "gsr_phase": {p: 0.0 for p in GSR_PAIRS},
     },
     {
         "name": "Duo",
@@ -127,7 +124,6 @@ ARC_PHASES = [
             (2, 3): 0.0, (2, 4): 0.0,
             (3, 4): 0.0,
         },
-        "gsr_phase": {p: 0.0 for p in GSR_PAIRS},
     },
     {
         "name": "Trio",
@@ -139,7 +135,6 @@ ARC_PHASES = [
             (2, 3): 0.25, (2, 4): 0.0,
             (3, 4): 0.0,
         },
-        "gsr_phase": {p: 0.0 for p in GSR_PAIRS},
     },
     {
         "name": "Full",
@@ -151,7 +146,6 @@ ARC_PHASES = [
             (2, 3): 0.25, (2, 4): 0.2,
             (3, 4): 0.2,
         },
-        "gsr_phase": {p: 0.0 for p in GSR_PAIRS},
     },
     {
         "name": "Crescendo",
@@ -162,12 +156,6 @@ ARC_PHASES = [
             (1, 3): 0.8, (1, 4): 0.75,
             (2, 3): 0.8, (2, 4): 0.75,
             (3, 4): 0.7,
-        },
-        "gsr_phase": {
-            (1, 2): 0.5 / (2 * math.pi),
-            (1, 3): 1.0 / (2 * math.pi), (1, 4): 1.5 / (2 * math.pi),
-            (2, 3): 0.8 / (2 * math.pi), (2, 4): 1.2 / (2 * math.pi),
-            (3, 4): 0.3 / (2 * math.pi),
         },
     },
     {
@@ -180,7 +168,6 @@ ARC_PHASES = [
             (2, 3): 0.15, (2, 4): 0.1,
             (3, 4): 0.1,
         },
-        "gsr_phase": {p: 0.1 / (2 * math.pi) for p in GSR_PAIRS},
     },
 ]
 
@@ -205,8 +192,6 @@ class ArcScenario:
             targets[("cap", i + 1)] = v
         for pair, v in p["gsr_mag"].items():
             targets[("gsr_mag", pair)] = v
-        for pair, v in p["gsr_phase"].items():
-            targets[("gsr_phase", pair)] = v
         return targets
 
     def update(self, dt: float) -> dict:
@@ -264,10 +249,6 @@ def build_channels(smoothing_rate: float = 0.02) -> dict:
             smoothing_rate=smoothing_rate, noise_offset=offset
         )
         offset += offset_step
-        channels[("gsr_phase", pair)] = SignalChannel(
-            smoothing_rate=0.01, noise_offset=offset
-        )
-        offset += offset_step
 
     return channels
 
@@ -305,14 +286,10 @@ def send_osc(clients: list, channels: dict, t: float, noise: bool = True) -> dic
     for pair in GSR_PAIRS:
         i, j = pair
         mag = _val(("gsr_mag", pair))
-        raw_phase = _val(("gsr_phase", pair))
-        phase_rad = raw_phase * math.pi * 2.0
 
         for client in clients:
             client.send_message(f"/gsr/{i}/{j}", float(mag))
-            client.send_message(f"/gsr/{i}/{j}/phase", float(phase_rad))
         sent[f"/gsr/{i}/{j}"] = mag
-        sent[f"/gsr/{i}/{j}/phase"] = phase_rad
 
     return sent
 
@@ -502,7 +479,6 @@ def _manual_loop(stdscr, clients: list, rate: float):
     channels = build_channels(smoothing_rate=0.15)
 
     # Manual mode: only cap and gsr_mag channels are user-controlled.
-    # gsr_phase channels exist in the channels dict but are left at 0.
 
     targets_str = ", ".join(f"{c._address}:{c._port}" for c in clients)
     selected = 0

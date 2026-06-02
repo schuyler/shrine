@@ -7,12 +7,12 @@
 //
 // \pair_voice — driven by 1 GSR pair. Additive sine cluster, 2 harmonics max.
 //   - GSR magnitude controls base frequency and amplitude
-//   - Coherence fixed at 1.0 (single pair, no meaningful phase comparison)
+//   - Coherence fixed at 1.0 (single pair, no meaningful inter-signal comparison)
 //
 // \triad_voice — driven by 3 GSR pairs. Additive sine cluster, 3 harmonics max.
 //   - GSR magnitude mean controls base frequency and amplitude
 //   - Count of active GSR connections controls harmonic richness
-//   - GSR phase coherence controls filter brightness
+//   - GSR magnitude-variance coherence controls filter brightness
 
 SynthDef(\pad_voice, {
     arg out = 0, capBus, gsrBus1, gsrBus2, gsrBus3,
@@ -75,13 +75,13 @@ SynthDef(\pair_voice, {
         collFilterLo = 200, collFilterHi = 4000,
         gsrActiveThreshold = 0.1;
 
-    // Single GSR pair: one magnitude, one phase
+    // Single GSR pair: magnitude only (FDM — no phase)
     var activity = In.kr(gsrMagBus);   // 0-1
 
     // 0 or 1 — UGen-level comparison, not language-level .if()
     var activeCount = (activity > gsrActiveThreshold);
 
-    // Single pair gives no meaningful phase comparison; fix coherence fully on
+    // Single pair gives no meaningful inter-signal comparison; fix coherence fully on
     var coherence = 1.0;
 
     // Base frequency driven by activity
@@ -111,19 +111,15 @@ SynthDef(\pair_voice, {
 SynthDef(\triad_voice, {
     arg out1, out2, out3,
         gsrMagBus1, gsrMagBus2, gsrMagBus3,
-        gsrPhaseBus1, gsrPhaseBus2, gsrPhaseBus3,
         amp = 0.02,
         baseFreqMin = 40, baseFreqMax = 120,
         collFilterLo = 200, collFilterHi = 4000,
         gsrActiveThreshold = 0.1;
 
-    // Read 3 magnitudes and 3 phases individually (buses may not be consecutive)
+    // Read 3 magnitudes individually (buses may not be consecutive)
     var mag1 = In.kr(gsrMagBus1);
     var mag2 = In.kr(gsrMagBus2);
     var mag3 = In.kr(gsrMagBus3);
-    var phase1 = In.kr(gsrPhaseBus1);
-    var phase2 = In.kr(gsrPhaseBus2);
-    var phase3 = In.kr(gsrPhaseBus3);
 
     // Overall GSR activity: mean of 3 magnitudes
     var activity = (mag1 + mag2 + mag3) / 3;
@@ -131,10 +127,12 @@ SynthDef(\triad_voice, {
     // Count of "active" connections (magnitude > threshold)
     var activeCount = (mag1 > gsrActiveThreshold) + (mag2 > gsrActiveThreshold) + (mag3 > gsrActiveThreshold);
 
-    // Phase coherence: low variance = high coherence = more tonal / brighter
-    var phaseMean = (phase1 + phase2 + phase3) / 3;
-    var phaseVar = (((phase1 - phaseMean).squared) + ((phase2 - phaseMean).squared) + ((phase3 - phaseMean).squared)) / 3;
-    var coherence = phaseVar.linlin(0, 2, 1, 0).clip(0, 1);
+    // Magnitude-variance coherence: low variance = high coherence = more tonal / brighter
+    // When all 3 magnitudes are similar, coherence is high (uniform engagement).
+    // When magnitudes diverge, coherence drops (uneven engagement).
+    var magMean = (mag1 + mag2 + mag3) / 3;
+    var magVar = ((mag1 - magMean).squared + (mag2 - magMean).squared + (mag3 - magMean).squared) / 3;
+    var coherence = magVar.linlin(0, 0.1, 1, 0).clip(0, 1);
 
     // Base frequency driven by activity
     var baseFreq = activity.linexp(0, 1, baseFreqMin, baseFreqMax);

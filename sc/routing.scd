@@ -77,9 +77,6 @@ s.sync;
         \gsrMagBus1, ~buses[\gsrMag].index + gsrIdx[0],
         \gsrMagBus2, ~buses[\gsrMag].index + gsrIdx[1],
         \gsrMagBus3, ~buses[\gsrMag].index + gsrIdx[2],
-        \gsrPhaseBus1, ~buses[\gsrPhase].index + gsrIdx[0],
-        \gsrPhaseBus2, ~buses[\gsrPhase].index + gsrIdx[1],
-        \gsrPhaseBus3, ~buses[\gsrPhase].index + gsrIdx[2],
     ], ~groups[\sources]);
 });
 

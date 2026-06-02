@@ -32,8 +32,7 @@ class MappingEngine:
     def __init__(self, config: dict):
         self._config = config
 
-    def compute(self, cap, gsr_mag, gsr_phase) -> list:
-        # gsr_phase is received but not currently used in the visual mapping
+    def compute(self, cap, gsr_mag) -> list:
         cfg = self._config
         idle_r, idle_g, idle_b = cfg["idle_color"]
         warm_r, warm_g, warm_b = cfg["warm_color"]

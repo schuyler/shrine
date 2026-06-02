@@ -1,5 +1,3 @@
-import math
-
 import pytest
 
 from leds.osc_input import build_dispatcher
@@ -51,35 +49,35 @@ class TestSimulatorCapHandlers:
         state = SensorState()
         dispatcher = build_dispatcher(state)
         _call(dispatcher, "/pad/1/cap", 0.8)
-        cap, _, _ = state.snapshot()
+        cap, _ = state.snapshot()
         assert cap[0] == pytest.approx(0.8)
 
     def test_pad2_cap_updates_slot1(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
         _call(dispatcher, "/pad/2/cap", 0.5)
-        cap, _, _ = state.snapshot()
+        cap, _ = state.snapshot()
         assert cap[1] == pytest.approx(0.5)
 
     def test_pad3_cap_updates_slot2(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
         _call(dispatcher, "/pad/3/cap", 0.3)
-        cap, _, _ = state.snapshot()
+        cap, _ = state.snapshot()
         assert cap[2] == pytest.approx(0.3)
 
     def test_pad4_cap_updates_slot3(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
         _call(dispatcher, "/pad/4/cap", 0.1)
-        cap, _, _ = state.snapshot()
+        cap, _ = state.snapshot()
         assert cap[3] == pytest.approx(0.1)
 
     def test_pad1_cap_does_not_affect_other_slots(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
         _call(dispatcher, "/pad/1/cap", 0.9)
-        cap, _, _ = state.snapshot()
+        cap, _ = state.snapshot()
         assert cap[1] == 0
         assert cap[2] == 0
         assert cap[3] == 0
@@ -90,291 +88,223 @@ class TestSimulatorGsrMagHandlers:
         state = SensorState()
         dispatcher = build_dispatcher(state)
         _call(dispatcher, "/gsr/1/2", 0.7)
-        _, gsr_mag, _ = state.snapshot()
+        _, gsr_mag = state.snapshot()
         assert gsr_mag[0] == pytest.approx(0.7)
 
     def test_gsr_1_3_updates_global_index_1(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
         _call(dispatcher, "/gsr/1/3", 0.6)
-        _, gsr_mag, _ = state.snapshot()
+        _, gsr_mag = state.snapshot()
         assert gsr_mag[1] == pytest.approx(0.6)
 
     def test_gsr_1_4_updates_global_index_2(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
         _call(dispatcher, "/gsr/1/4", 0.5)
-        _, gsr_mag, _ = state.snapshot()
+        _, gsr_mag = state.snapshot()
         assert gsr_mag[2] == pytest.approx(0.5)
 
     def test_gsr_2_3_updates_global_index_3(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
         _call(dispatcher, "/gsr/2/3", 0.4)
-        _, gsr_mag, _ = state.snapshot()
+        _, gsr_mag = state.snapshot()
         assert gsr_mag[3] == pytest.approx(0.4)
 
     def test_gsr_2_4_updates_global_index_4(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
         _call(dispatcher, "/gsr/2/4", 0.3)
-        _, gsr_mag, _ = state.snapshot()
+        _, gsr_mag = state.snapshot()
         assert gsr_mag[4] == pytest.approx(0.3)
 
     def test_gsr_3_4_updates_global_index_5(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
         _call(dispatcher, "/gsr/3/4", 0.2)
-        _, gsr_mag, _ = state.snapshot()
+        _, gsr_mag = state.snapshot()
         assert gsr_mag[5] == pytest.approx(0.2)
 
 
-class TestSimulatorGsrPhaseHandlers:
-    def test_gsr_1_2_phase_updates_global_index_0(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        _call(dispatcher, "/gsr/1/2/phase", 1.5)
-        _, _, gsr_phase = state.snapshot()
-        assert gsr_phase[0] == pytest.approx(1.5)
-
-    def test_gsr_3_4_phase_updates_global_index_5(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        _call(dispatcher, "/gsr/3/4/phase", 4.2)
-        _, _, gsr_phase = state.snapshot()
-        assert gsr_phase[5] == pytest.approx(4.2)
-
-    def test_simulator_phase_stored_as_is_no_normalization(self):
-        """Simulator sends 0..2pi; no normalization should occur."""
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        two_pi = 2 * math.pi
-        _call(dispatcher, "/gsr/2/3/phase", two_pi * 0.75)
-        _, _, gsr_phase = state.snapshot()
-        assert gsr_phase[3] == pytest.approx(two_pi * 0.75)
-
-    def test_simulator_phase_zero_stored_as_zero(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        _call(dispatcher, "/gsr/1/3/phase", 0.0)
-        _, _, gsr_phase = state.snapshot()
-        assert gsr_phase[1] == pytest.approx(0.0)
-
-
 class TestEdgeNodeHandlerNode0:
-    """Node 0 has no GSR RX slots; only cap updates."""
+    """Node 0: NODE_GSR_MAPPING[0] = [0, 1, 2] — all 3 GSR slots active."""
 
-    def _send_node0(self, dispatcher, cap, gsr_mags, gsr_phases):
-        args = [cap] + gsr_mags + gsr_phases
-        _call(dispatcher, "/shrine/node/0", *args)
+    def _send_node0(self, dispatcher, stdev, carrier_mag, m0, m1, m2):
+        _call(dispatcher, "/shrine/node/0", stdev, carrier_mag, m0, m1, m2)
 
     def test_node0_updates_cap_slot0(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node0(dispatcher, 0.6, [0.1, 0.2, 0.3], [0.4, 0.5, 0.6])
-        cap, _, _ = state.snapshot()
+        self._send_node0(dispatcher, 0.6, 0.0, 0.1, 0.2, 0.3)
+        cap, _ = state.snapshot()
         assert cap[0] == pytest.approx(0.6)
 
-    def test_node0_does_not_update_gsr_mag(self):
+    def test_node0_uses_stdev_as_cap(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node0(dispatcher, 0.6, [0.9, 0.8, 0.7], [1.0, 1.1, 1.2])
-        _, gsr_mag, _ = state.snapshot()
-        assert gsr_mag == [0, 0, 0, 0, 0, 0]
+        self._send_node0(dispatcher, 0.42, 0.9, 0.1, 0.2, 0.3)
+        cap, _ = state.snapshot()
+        assert cap[0] == pytest.approx(0.42)
 
-    def test_node0_does_not_update_gsr_phase(self):
+    def test_node0_updates_gsr_mag_global0(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node0(dispatcher, 0.6, [0.1, 0.2, 0.3], [1.0, 2.0, 3.0])
-        _, _, gsr_phase = state.snapshot()
-        assert gsr_phase == [0, 0, 0, 0, 0, 0]
+        self._send_node0(dispatcher, 0.0, 0.0, 0.11, 0.22, 0.33)
+        _, gsr_mag = state.snapshot()
+        assert gsr_mag[0] == pytest.approx(0.11)
+
+    def test_node0_updates_gsr_mag_global1(self):
+        state = SensorState()
+        dispatcher = build_dispatcher(state)
+        self._send_node0(dispatcher, 0.0, 0.0, 0.11, 0.22, 0.33)
+        _, gsr_mag = state.snapshot()
+        assert gsr_mag[1] == pytest.approx(0.22)
+
+    def test_node0_updates_gsr_mag_global2(self):
+        state = SensorState()
+        dispatcher = build_dispatcher(state)
+        self._send_node0(dispatcher, 0.0, 0.0, 0.11, 0.22, 0.33)
+        _, gsr_mag = state.snapshot()
+        assert gsr_mag[2] == pytest.approx(0.33)
+
+    def test_node0_does_not_update_globals_3_4_5(self):
+        state = SensorState()
+        dispatcher = build_dispatcher(state)
+        self._send_node0(dispatcher, 0.0, 0.0, 0.5, 0.5, 0.5)
+        _, gsr_mag = state.snapshot()
+        assert gsr_mag[3] == 0
+        assert gsr_mag[4] == 0
+        assert gsr_mag[5] == 0
 
 
 class TestEdgeNodeHandlerNode1:
-    """Node 1: NODE_GSR_MAPPING[1] = [0] — one active GSR slot maps to global pair 0."""
+    """Node 1: NODE_GSR_MAPPING[1] = [3, 4, 0] — all 3 GSR slots map to globals 3, 4, 0."""
 
-    def _send_node1(self, dispatcher, cap, gsr_mags, gsr_phases):
-        args = [cap] + gsr_mags + gsr_phases
-        _call(dispatcher, "/shrine/node/1", *args)
+    def _send_node1(self, dispatcher, stdev, carrier_mag, m0, m1, m2):
+        _call(dispatcher, "/shrine/node/1", stdev, carrier_mag, m0, m1, m2)
 
     def test_node1_updates_cap_slot1(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node1(dispatcher, 0.6, [0.3, 0.0, 0.0], [1.0, 0.0, 0.0])
-        cap, _, _ = state.snapshot()
+        self._send_node1(dispatcher, 0.6, 0.0, 0.3, 0.4, 0.5)
+        cap, _ = state.snapshot()
         assert cap[1] == pytest.approx(0.6)
+
+    def test_node1_updates_gsr_mag_global3(self):
+        state = SensorState()
+        dispatcher = build_dispatcher(state)
+        self._send_node1(dispatcher, 0.0, 0.0, 0.3, 0.4, 0.5)
+        _, gsr_mag = state.snapshot()
+        assert gsr_mag[3] == pytest.approx(0.3)
+
+    def test_node1_updates_gsr_mag_global4(self):
+        state = SensorState()
+        dispatcher = build_dispatcher(state)
+        self._send_node1(dispatcher, 0.0, 0.0, 0.3, 0.4, 0.5)
+        _, gsr_mag = state.snapshot()
+        assert gsr_mag[4] == pytest.approx(0.4)
 
     def test_node1_updates_gsr_mag_global0(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node1(dispatcher, 0.6, [0.3, 0.0, 0.0], [1.0, 0.0, 0.0])
-        _, gsr_mag, _ = state.snapshot()
-        assert gsr_mag[0] == pytest.approx(0.3)
+        self._send_node1(dispatcher, 0.0, 0.0, 0.3, 0.4, 0.5)
+        _, gsr_mag = state.snapshot()
+        assert gsr_mag[0] == pytest.approx(0.5)
 
-    def test_node1_updates_gsr_phase_global0(self):
+    def test_node1_does_not_update_globals_1_2_5(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node1(dispatcher, 0.6, [0.3, 0.0, 0.0], [1.0, 0.0, 0.0])
-        _, _, gsr_phase = state.snapshot()
-        assert gsr_phase[0] == pytest.approx(1.0)
-
-    def test_node1_does_not_update_other_global_pairs(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node1(dispatcher, 0.6, [0.3, 0.0, 0.0], [1.0, 0.0, 0.0])
-        _, gsr_mag, gsr_phase = state.snapshot()
-        for i in range(1, 6):
-            assert gsr_mag[i] == 0
-            assert gsr_phase[i] == 0
+        self._send_node1(dispatcher, 0.0, 0.0, 0.5, 0.5, 0.5)
+        _, gsr_mag = state.snapshot()
+        assert gsr_mag[1] == 0
+        assert gsr_mag[2] == 0
+        assert gsr_mag[5] == 0
 
 
 class TestEdgeNodeHandlerNode2:
-    """Node 2: NODE_GSR_MAPPING[2] = [1, 3] — two active slots, tests phase normalization."""
+    """Node 2: NODE_GSR_MAPPING[2] = [5, 1, 3] — all 3 GSR slots map to globals 5, 1, 3."""
 
-    def _send_node2(self, dispatcher, cap, gsr_mags, gsr_phases):
-        args = [cap] + gsr_mags + gsr_phases
-        _call(dispatcher, "/shrine/node/2", *args)
+    def _send_node2(self, dispatcher, stdev, carrier_mag, m0, m1, m2):
+        _call(dispatcher, "/shrine/node/2", stdev, carrier_mag, m0, m1, m2)
 
     def test_node2_updates_cap_slot2(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node2(dispatcher, 0.5, [0.4, 0.35, 0.0], [0.5, -1.0, 0.0])
-        cap, _, _ = state.snapshot()
+        self._send_node2(dispatcher, 0.5, 0.0, 0.4, 0.35, 0.25)
+        cap, _ = state.snapshot()
         assert cap[2] == pytest.approx(0.5)
+
+    def test_node2_updates_gsr_mag_global5(self):
+        state = SensorState()
+        dispatcher = build_dispatcher(state)
+        self._send_node2(dispatcher, 0.0, 0.0, 0.4, 0.35, 0.25)
+        _, gsr_mag = state.snapshot()
+        assert gsr_mag[5] == pytest.approx(0.4)
 
     def test_node2_updates_gsr_mag_global1(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node2(dispatcher, 0.5, [0.4, 0.35, 0.0], [0.5, -1.0, 0.0])
-        _, gsr_mag, _ = state.snapshot()
-        assert gsr_mag[1] == pytest.approx(0.4)
+        self._send_node2(dispatcher, 0.0, 0.0, 0.4, 0.35, 0.25)
+        _, gsr_mag = state.snapshot()
+        assert gsr_mag[1] == pytest.approx(0.35)
 
     def test_node2_updates_gsr_mag_global3(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node2(dispatcher, 0.5, [0.4, 0.35, 0.0], [0.5, -1.0, 0.0])
-        _, gsr_mag, _ = state.snapshot()
-        assert gsr_mag[3] == pytest.approx(0.35)
+        self._send_node2(dispatcher, 0.0, 0.0, 0.4, 0.35, 0.25)
+        _, gsr_mag = state.snapshot()
+        assert gsr_mag[3] == pytest.approx(0.25)
 
-    def test_node2_updates_gsr_phase_global1_positive_unchanged(self):
+    def test_node2_does_not_update_globals_0_2_4(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node2(dispatcher, 0.5, [0.4, 0.35, 0.0], [0.5, -1.0, 0.0])
-        _, _, gsr_phase = state.snapshot()
-        assert gsr_phase[1] == pytest.approx(0.5)
-
-    def test_node2_updates_gsr_phase_global3_negative_normalized(self):
-        """local[1] phase = -1.0; normalization adds 2*pi to give a positive result."""
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node2(dispatcher, 0.5, [0.4, 0.35, 0.0], [0.5, -1.0, 0.0])
-        _, _, gsr_phase = state.snapshot()
-        assert gsr_phase[3] == pytest.approx(-1.0 + 2 * math.pi, abs=1e-5)
-
-    def test_node2_does_not_update_global_pairs_0_2_4_5(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node2(dispatcher, 0.5, [0.4, 0.35, 0.0], [0.5, -1.0, 0.0])
-        _, gsr_mag, gsr_phase = state.snapshot()
-        for i in [0, 2, 4, 5]:
-            assert gsr_mag[i] == 0
-            assert gsr_phase[i] == 0
+        self._send_node2(dispatcher, 0.0, 0.0, 0.5, 0.5, 0.5)
+        _, gsr_mag = state.snapshot()
+        assert gsr_mag[0] == 0
+        assert gsr_mag[2] == 0
+        assert gsr_mag[4] == 0
 
 
 class TestEdgeNodeHandlerNode3:
-    """Node 3 maps local[0]->global 2, local[1]->global 4, local[2]->global 5."""
+    """Node 3: NODE_GSR_MAPPING[3] = [2, 4, 5] — all 3 GSR slots map to globals 2, 4, 5."""
 
-    def _send_node3(self, dispatcher, cap, gsr_mags, gsr_phases):
-        args = [cap] + gsr_mags + gsr_phases
-        _call(dispatcher, "/shrine/node/3", *args)
+    def _send_node3(self, dispatcher, stdev, carrier_mag, m0, m1, m2):
+        _call(dispatcher, "/shrine/node/3", stdev, carrier_mag, m0, m1, m2)
 
     def test_node3_updates_cap_slot3(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, 0.7, [0.1, 0.2, 0.3], [0.0, 0.0, 0.0])
-        cap, _, _ = state.snapshot()
+        self._send_node3(dispatcher, 0.7, 0.0, 0.1, 0.2, 0.3)
+        cap, _ = state.snapshot()
         assert cap[3] == pytest.approx(0.7)
 
     def test_node3_updates_gsr_mag_global2(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, 0.0, [0.4, 0.5, 0.6], [0.0, 0.0, 0.0])
-        _, gsr_mag, _ = state.snapshot()
+        self._send_node3(dispatcher, 0.0, 0.0, 0.4, 0.5, 0.6)
+        _, gsr_mag = state.snapshot()
         assert gsr_mag[2] == pytest.approx(0.4)
 
     def test_node3_updates_gsr_mag_global4(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, 0.0, [0.4, 0.5, 0.6], [0.0, 0.0, 0.0])
-        _, gsr_mag, _ = state.snapshot()
+        self._send_node3(dispatcher, 0.0, 0.0, 0.4, 0.5, 0.6)
+        _, gsr_mag = state.snapshot()
         assert gsr_mag[4] == pytest.approx(0.5)
 
     def test_node3_updates_gsr_mag_global5(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, 0.0, [0.4, 0.5, 0.6], [0.0, 0.0, 0.0])
-        _, gsr_mag, _ = state.snapshot()
+        self._send_node3(dispatcher, 0.0, 0.0, 0.4, 0.5, 0.6)
+        _, gsr_mag = state.snapshot()
         assert gsr_mag[5] == pytest.approx(0.6)
 
-    def test_node3_does_not_update_other_gsr_mag_slots(self):
+    def test_node3_does_not_update_globals_0_1_3(self):
         state = SensorState()
         dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, 0.0, [0.4, 0.5, 0.6], [0.0, 0.0, 0.0])
-        _, gsr_mag, _ = state.snapshot()
+        self._send_node3(dispatcher, 0.0, 0.0, 0.5, 0.5, 0.5)
+        _, gsr_mag = state.snapshot()
         assert gsr_mag[0] == 0
         assert gsr_mag[1] == 0
         assert gsr_mag[3] == 0
-
-    def test_node3_positive_phase_passes_through_normalization_unchanged(self):
-        # The normalization conditional (if phase < 0: phase += 2*pi) runs but
-        # does not change positive values, so the stored result equals the input.
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, 0.0, [0.0, 0.0, 0.0], [math.pi, 2.0, 3.0])
-        _, _, gsr_phase = state.snapshot()
-        assert gsr_phase[2] == pytest.approx(math.pi)
-
-    def test_node3_zero_phase_stays_zero(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, 0.0, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
-        _, _, gsr_phase = state.snapshot()
-        assert gsr_phase[2] == pytest.approx(0.0)
-        assert gsr_phase[4] == pytest.approx(0.0)
-        assert gsr_phase[5] == pytest.approx(0.0)
-
-
-class TestEdgeNodePhaseNormalization:
-    """Negative phase from edge nodes should get +2pi."""
-
-    def _send_node3(self, dispatcher, phases):
-        args = [0.0, 0.0, 0.0, 0.0] + phases
-        _call(dispatcher, "/shrine/node/3", *args)
-
-    def test_negative_pi_normalizes_to_pi(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, [-math.pi, 0.0, 0.0])
-        _, _, gsr_phase = state.snapshot()
-        assert gsr_phase[2] == pytest.approx(math.pi, abs=1e-5)
-
-    def test_zero_phase_stays_zero(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, [0.0, 0.0, 0.0])
-        _, _, gsr_phase = state.snapshot()
-        assert gsr_phase[2] == pytest.approx(0.0)
-
-    def test_positive_pi_stays_pi(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, [math.pi, 0.0, 0.0])
-        _, _, gsr_phase = state.snapshot()
-        assert gsr_phase[2] == pytest.approx(math.pi)
-
-    def test_negative_half_pi_normalizes(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, [-math.pi / 2, 0.0, 0.0])
-        _, _, gsr_phase = state.snapshot()
-        assert gsr_phase[2] == pytest.approx(3 * math.pi / 2, abs=1e-5)

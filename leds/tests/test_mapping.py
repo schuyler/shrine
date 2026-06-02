@@ -49,12 +49,12 @@ class TestSegmentParams:
 class TestMappingEngineOutput:
     def test_compute_returns_list_of_4(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([0.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([0.0] * 4, [0.0] * 6)
         assert len(result) == 4
 
     def test_compute_returns_segment_params_instances(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([0.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([0.0] * 4, [0.0] * 6)
         for item in result:
             assert isinstance(item, SegmentParams)
 
@@ -62,31 +62,31 @@ class TestMappingEngineOutput:
 class TestAllZerosInput:
     def test_idle_color_r(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([0.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([0.0] * 4, [0.0] * 6)
         for seg in result:
             assert seg.color_r == TEST_CONFIG["idle_color"][0]
 
     def test_idle_color_g(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([0.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([0.0] * 4, [0.0] * 6)
         for seg in result:
             assert seg.color_g == TEST_CONFIG["idle_color"][1]
 
     def test_idle_color_b(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([0.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([0.0] * 4, [0.0] * 6)
         for seg in result:
             assert seg.color_b == TEST_CONFIG["idle_color"][2]
 
     def test_min_brightness(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([0.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([0.0] * 4, [0.0] * 6)
         for seg in result:
             assert seg.bri == TEST_CONFIG["min_brightness"]
 
     def test_idle_effect(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([0.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([0.0] * 4, [0.0] * 6)
         for seg in result:
             assert seg.fx == TEST_CONFIG["idle_effect"]
 
@@ -94,31 +94,31 @@ class TestAllZerosInput:
 class TestFullCapNoGsr:
     def test_warm_color_r(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([1.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([1.0] * 4, [0.0] * 6)
         for seg in result:
             assert seg.color_r == TEST_CONFIG["warm_color"][0]
 
     def test_warm_color_g(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([1.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([1.0] * 4, [0.0] * 6)
         for seg in result:
             assert seg.color_g == TEST_CONFIG["warm_color"][1]
 
     def test_warm_color_b(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([1.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([1.0] * 4, [0.0] * 6)
         for seg in result:
             assert seg.color_b == TEST_CONFIG["warm_color"][2]
 
     def test_max_brightness(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([1.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([1.0] * 4, [0.0] * 6)
         for seg in result:
             assert seg.bri == TEST_CONFIG["max_brightness"]
 
     def test_idle_effect_without_gsr(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([1.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([1.0] * 4, [0.0] * 6)
         for seg in result:
             assert seg.fx == TEST_CONFIG["idle_effect"]
 
@@ -126,20 +126,20 @@ class TestFullCapNoGsr:
 class TestFullCapFullGsr:
     def test_gsr_effect(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([1.0] * 4, [1.0] * 6, [0.0] * 6)
+        result = engine.compute([1.0] * 4, [1.0] * 6)
         for seg in result:
             assert seg.fx == TEST_CONFIG["gsr_effect"]
 
     def test_max_brightness_with_gsr(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([1.0] * 4, [1.0] * 6, [0.0] * 6)
+        result = engine.compute([1.0] * 4, [1.0] * 6)
         for seg in result:
             assert seg.bri == TEST_CONFIG["max_brightness"]
 
     def test_gsr_color_influence(self):
         """With full GSR, color should show gsr_shared_color influence (not idle_color)."""
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([1.0] * 4, [1.0] * 6, [0.0] * 6)
+        result = engine.compute([1.0] * 4, [1.0] * 6)
         # At full GSR, color must differ from idle_color in at least one channel
         idle = TEST_CONFIG["idle_color"]
         for seg in result:
@@ -154,7 +154,7 @@ class TestBrightnessScaling:
         max_bri = TEST_CONFIG["max_brightness"]
 
         for cap_val in [0.0, 0.25, 0.5, 0.75, 1.0]:
-            result = engine.compute([cap_val] * 4, [0.0] * 6, [0.0] * 6)
+            result = engine.compute([cap_val] * 4, [0.0] * 6)
             expected_bri = min_bri + cap_val * (max_bri - min_bri)
             for seg in result:
                 assert seg.bri == pytest.approx(expected_bri, abs=2), (
@@ -163,13 +163,13 @@ class TestBrightnessScaling:
 
     def test_brightness_at_zero_is_min(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([0.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([0.0] * 4, [0.0] * 6)
         for seg in result:
             assert seg.bri == TEST_CONFIG["min_brightness"]
 
     def test_brightness_at_full_is_max(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([1.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([1.0] * 4, [0.0] * 6)
         for seg in result:
             assert seg.bri == TEST_CONFIG["max_brightness"]
 
@@ -182,7 +182,7 @@ class TestSpeedScaling:
         speed_max = TEST_CONFIG["speed_max"]
 
         for cap_val in [0.0, 0.25, 0.5, 0.75, 1.0]:
-            result = engine.compute([cap_val] * 4, [0.0] * 6, [0.0] * 6)
+            result = engine.compute([cap_val] * 4, [0.0] * 6)
             expected_sx = speed_min + cap_val * (speed_max - speed_min)
             for seg in result:
                 assert seg.sx == pytest.approx(expected_sx, abs=2), (
@@ -191,20 +191,20 @@ class TestSpeedScaling:
 
     def test_speed_at_zero_cap_is_speed_min(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([0.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([0.0] * 4, [0.0] * 6)
         for seg in result:
             assert seg.sx == TEST_CONFIG["speed_min"]
 
     def test_speed_at_full_cap_is_speed_max(self):
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([1.0] * 4, [0.0] * 6, [0.0] * 6)
+        result = engine.compute([1.0] * 4, [0.0] * 6)
         for seg in result:
             assert seg.sx == TEST_CONFIG["speed_max"]
 
     def test_speed_uses_mean_of_all_caps(self):
         """Only pad 0 active: mean = 0.25; speed should reflect the mean, not pad 0 alone."""
         engine = MappingEngine(TEST_CONFIG)
-        result = engine.compute([1.0, 0.0, 0.0, 0.0], [0.0] * 6, [0.0] * 6)
+        result = engine.compute([1.0, 0.0, 0.0, 0.0], [0.0] * 6)
         speed_min = TEST_CONFIG["speed_min"]
         speed_max = TEST_CONFIG["speed_max"]
         expected = speed_min + 0.25 * (speed_max - speed_min)
@@ -231,35 +231,35 @@ class TestPerPadGsrMapping:
         """Pad 0 segment should show GSR effect when pairs 0,1,2 are active."""
         engine = MappingEngine(TEST_CONFIG)
         mag = self._make_gsr_mag([0, 1, 2], value=1.0)
-        result = engine.compute([1.0] * 4, mag, [0.0] * 6)
+        result = engine.compute([1.0] * 4, mag)
         assert result[0].fx == TEST_CONFIG["gsr_effect"]
 
     def test_pad1_gsr_from_pairs_0_3_4(self):
         """Pad 1 segment should show GSR effect when pairs 0,3,4 are active."""
         engine = MappingEngine(TEST_CONFIG)
         mag = self._make_gsr_mag([0, 3, 4], value=1.0)
-        result = engine.compute([1.0] * 4, mag, [0.0] * 6)
+        result = engine.compute([1.0] * 4, mag)
         assert result[1].fx == TEST_CONFIG["gsr_effect"]
 
     def test_pad2_gsr_from_pairs_1_3_5(self):
         """Pad 2 segment should show GSR effect when pairs 1,3,5 are active."""
         engine = MappingEngine(TEST_CONFIG)
         mag = self._make_gsr_mag([1, 3, 5], value=1.0)
-        result = engine.compute([1.0] * 4, mag, [0.0] * 6)
+        result = engine.compute([1.0] * 4, mag)
         assert result[2].fx == TEST_CONFIG["gsr_effect"]
 
     def test_pad3_gsr_from_pairs_2_4_5(self):
         """Pad 3 segment should show GSR effect when pairs 2,4,5 are active."""
         engine = MappingEngine(TEST_CONFIG)
         mag = self._make_gsr_mag([2, 4, 5], value=1.0)
-        result = engine.compute([1.0] * 4, mag, [0.0] * 6)
+        result = engine.compute([1.0] * 4, mag)
         assert result[3].fx == TEST_CONFIG["gsr_effect"]
 
     def test_pad0_no_gsr_when_irrelevant_pairs_active(self):
         """Pairs 3,4,5 don't involve pad 0; pad 0 segment should not trigger GSR effect."""
         engine = MappingEngine(TEST_CONFIG)
         mag = self._make_gsr_mag([3, 4, 5], value=1.0)
-        result = engine.compute([1.0] * 4, mag, [0.0] * 6)
+        result = engine.compute([1.0] * 4, mag)
         assert result[0].fx == TEST_CONFIG["idle_effect"]
 
 
@@ -273,13 +273,13 @@ class TestIxField:
         engine = MappingEngine(TEST_CONFIG)
 
         inputs = [
-            ([0.0] * 4, [0.0] * 6, [0.0] * 6),
-            ([1.0] * 4, [1.0] * 6, [0.0] * 6),
-            ([0.5] * 4, [0.3] * 6, [1.0] * 6),
+            ([0.0] * 4, [0.0] * 6),
+            ([1.0] * 4, [1.0] * 6),
+            ([0.5] * 4, [0.3] * 6),
         ]
         ix_values = set()
-        for cap, mag, phase in inputs:
-            result = engine.compute(cap, mag, phase)
+        for cap, mag in inputs:
+            result = engine.compute(cap, mag)
             for seg in result:
                 ix_values.add(seg.ix)
 
@@ -294,10 +294,9 @@ class TestPureFunction:
         engine = MappingEngine(TEST_CONFIG)
         cap = [0.3, 0.5, 0.7, 0.2]
         mag = [0.1, 0.4, 0.6, 0.2, 0.8, 0.3]
-        phase = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
 
-        result1 = engine.compute(cap, mag, phase)
-        result2 = engine.compute(cap, mag, phase)
+        result1 = engine.compute(cap, mag)
+        result2 = engine.compute(cap, mag)
 
         for s1, s2 in zip(result1, result2):
             assert (s1.color_r, s1.color_g, s1.color_b, s1.bri, s1.fx, s1.sx, s1.ix) == (
@@ -312,6 +311,6 @@ class TestPureFunction:
 
     def test_different_inputs_can_produce_different_outputs(self):
         engine = MappingEngine(TEST_CONFIG)
-        result_zero = engine.compute([0.0] * 4, [0.0] * 6, [0.0] * 6)
-        result_full = engine.compute([1.0] * 4, [1.0] * 6, [0.0] * 6)
+        result_zero = engine.compute([0.0] * 4, [0.0] * 6)
+        result_full = engine.compute([1.0] * 4, [1.0] * 6)
         assert result_zero[0].bri != result_full[0].bri

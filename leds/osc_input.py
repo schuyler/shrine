@@ -1,7 +1,6 @@
 """OSC dispatcher factory for incoming sensor messages."""
 
 import logging
-import math
 
 from pythonosc.dispatcher import Dispatcher
 
@@ -36,27 +35,16 @@ def build_dispatcher(state: SensorState) -> Dispatcher:
 
         dispatcher.map(f"/gsr/{i}/{j}", make_mag_handler(global_idx))
 
-    # /gsr/{i}/{j}/phase handlers (simulator: store as-is, no normalization)
-    for (i, j), global_idx in _PAIR_TO_INDEX.items():
-        def make_phase_handler(gidx):
-            def handler(address, value, *args):
-                state.set_gsr_phase(gidx, value)
-            return handler
-
-        dispatcher.map(f"/gsr/{i}/{j}/phase", make_phase_handler(global_idx))
-
     # /shrine/node/{0..3} edge node handlers
+    # FDM format: stdev, carrier_mag, m0, m1, m2
+    # stdev is used as cap; carrier_mag is ignored; all 3 GSR slots are always populated.
     for node_id in range(4):
         def make_node_handler(nid):
-            def handler(address, cap, m0, m1, m2, p0, p1, p2, *args):
-                state.set_cap(nid, cap)
+            def handler(address, stdev, carrier_mag, m0, m1, m2, *args):
+                state.set_cap(nid, stdev)
                 local_mags = [m0, m1, m2]
-                local_phases = [p0, p1, p2]
                 for local_idx, global_idx in enumerate(NODE_GSR_MAPPING[nid]):
-                    phase = local_phases[local_idx]
-                    if phase < 0:
-                        phase += 2 * math.pi
-                    state.set_gsr(global_idx, local_mags[local_idx], phase)
+                    state.set_gsr_mag(global_idx, local_mags[local_idx])
             return handler
 
         dispatcher.map(f"/shrine/node/{node_id}", make_node_handler(node_id))
