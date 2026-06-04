@@ -212,8 +212,11 @@ static void dump_window(const uint16_t *buf)
 {
     for (int i = 0; i < WINDOW_SIZE; i++) {
         printf("%u\n", (unsigned)buf[i]);
+        if ((i & 63) == 63)
+            fflush(stdout);
     }
     printf("END\n");
+    fflush(stdout);
 }
 
 /* -------------------------------------------------------------------------
@@ -261,7 +264,9 @@ void app_main(void)
     ESP_LOGI(TAG, "fs_measured=%.1f", fs);
 
     /* --- Derive carrier bin and excitation frequency --- */
-    int k = 180 + (int)node_id * 20;
+    /* Target carrier frequencies: 40/45/50/55 kHz (same as before N increase) */
+    float f_target = 40000.0f + (float)node_id * 5000.0f;
+    int k = (int)(f_target * (float)WINDOW_SIZE / fs + 0.5f);
     float f_exc_req = (float)k * fs / (float)WINDOW_SIZE;
 
     /* --- LEDC excitation ---

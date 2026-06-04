@@ -25,6 +25,11 @@ sdkconfig.*
 # Test binaries
 edge-node/test/test_tdm
 edge-node/test/test_tinyosc
+edge-node/test/test_adc_parse
+edge-node/test/test_fdm_math
+
+# fdm-bench ADC captures (data, not source)
+fdm-bench/*.txt
 
 # OS
 .DS_Store
