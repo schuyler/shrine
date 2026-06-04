@@ -3,6 +3,7 @@ idf_component_register(
         "nvs_config.c"
         "excitation.c"
         "adc_read.c"
+        "adc_parse.c"
         "fdm_math.c"
         "sensing_task.c"
         "network_task.c"
@@ -11,6 +12,7 @@ idf_component_register(
     REQUIRES
         nvs_flash
         driver
+        esp_adc
         esp_wifi
         esp_netif
         esp_event

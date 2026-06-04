@@ -1,37 +1,36 @@
 # MiniCAT Edge Node Firmware
 
-Four ESP32-S3 nodes performing AC capacitive sensing and cross-node galvanic
-skin response (GSR) measurement. Each node demodulates ADC samples in-phase/
-quadrature and sends results as OSC packets over WiFi to a SuperCollider host.
+Four ESP32-WROOM-32 nodes performing AC capacitive sensing and cross-node
+galvanic skin response (GSR) measurement via frequency-division multiplexing
+(FDM). Each node demodulates internal ADC DMA samples in-phase/quadrature and
+sends results as OSC packets over WiFi to a SuperCollider host.
 
 ## Hardware
 
 ### Target board
 
-`esp32-s3-devkitc-1` (4 MB flash)
+`esp32dev` (ESP32-WROOM-32, 4 MB flash)
 
 ### Pin assignments
 
 | GPIO | Function | Notes |
 |------|----------|-------|
-| 4 | Excitation output (LEDC) | ~20 kHz, 50% duty, exact freq set at startup calibration |
-| 5 | Sync bus | Leader: push-pull output. Follower: rising-edge interrupt input. |
-| 10 | SPI CS | Software-controlled |
-| 12 | SPI CLK | `SPI2_HOST`, 1.0 MHz |
-| 13 | SPI MISO | MCP3201 D_out |
-| 19, 20 | USB-CDC | Debug log output only |
+| 4 | Excitation output (LEDC) | 50% duty; exact frequency set at startup calibration |
+| 36 | ADC input (ADC1_CH0) | Internal ADC, DMA continuous mode, 12-bit |
 
 ### ADC
 
-MCP3201 12-bit SPI ADC. MOSI is not connected (`mosi_io_num = -1`). Raw frame
-extraction: `(raw >> 2) & 0x0FFF` (1 null bit + 12 data bits MSB-first +
-3 sub-LSB echo bits).
+Internal ESP32 ADC1_CH0 (GPIO36) via `adc_continuous` DMA driver. Configured
+for `ADC_DIGI_OUTPUT_FORMAT_TYPE1` (2 bytes per sample: bits [11:0] = 12-bit
+data, bits [15:12] = channel). Sample rate requested: 220 ksps; actual ~180
+ksps due to ESP32 I2S 9/11 clock ratio. Frame size: 2048 bytes (1024 samples).
 
-### Sync bus
+### Excitation
 
-A single wire connects GPIO 5 on all four nodes. One node is designated leader
-in NVS (`leader=1`); the other three are followers. The leader drives a ~5 µs
-pulse every 10 ms. Followers trigger on the rising edge.
+LEDC high-speed mode (timer 0, channel 0, GPIO 4). Frequency is computed at
+startup from the calibrated ADC sample rate and this node's carrier bin:
+`f_exc = k_self * fs / N`. All four nodes run simultaneously on distinct
+frequencies; no synchronization bus is required.
 
 ## Build
 
@@ -41,7 +40,7 @@ Install [PlatformIO](https://platformio.org/), then from `shrine/edge-node/`:
 pio run
 ```
 
-To build and flash:
+To build and flash (run on corazon, not the dev machine):
 
 ```sh
 pio run --target upload
@@ -55,23 +54,26 @@ pio device monitor
 
 ## NVS Provisioning
 
-Each node requires a separate NVS partition. CSV templates are in `nvs/`.
+Each node requires a separate NVS partition containing WiFi credentials and
+node parameters. CSV templates are in `nvs/`.
 
 ### CSV keys (`shrine` namespace)
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `node_id` | u8 | Node index, 0–3 |
-| `leader` | u8 | 1 = leader (drives sync pulse), 0 = follower |
-| `wifi_ssid` | string | WiFi network name (max 32 chars) |
-| `wifi_pass` | string | WiFi password (max 64 chars) |
-| `osc_host` | string | OSC destination IP, dotted-quad (e.g. `192.168.4.255`) |
-| `osc_port` | u16 | OSC destination UDP port (e.g. `57120`) |
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `node_id` | u8 | yes | Node index, 0–3 |
+| `wifi_ssid` | string | yes | WiFi network name (max 32 chars) |
+| `wifi_pass` | string | yes | WiFi password (max 64 chars) |
+| `osc_host` | string | yes | OSC destination IP, dotted-quad (e.g. `192.168.4.255`) |
+| `osc_port` | u16 | yes | OSC destination UDP port (e.g. `57120`) |
+| `base_k` | u16 | no | DFT bin for node 0 (default 180) |
+| `step_k` | u16 | no | Bin spacing between nodes (default 20) |
+| `window_n` | u16 | no | Samples per demod window (default 1800) |
 
 ### Generate and flash
 
 Requires ESP-IDF on `$IDF_PATH`. Repeat for each node, substituting the CSV
-and binary filename.
+and binary filename. Alternatively, use `scripts/flash-nvs.sh <node_id>`.
 
 ```sh
 # Generate binary from CSV
@@ -86,15 +88,29 @@ The NVS partition is at `0x9000`, size `0x6000` (defined in `partitions.csv`).
 
 ### Configuration
 
-To change the WiFi network or OSC destination, edit the `wifi_ssid`,
-`wifi_pass`, and `osc_host`/`osc_port` fields in the appropriate `nvs/nodeN.csv`
-file, then regenerate and reflash the NVS partition. Firmware does not need
-to be rebuilt.
+To change the WiFi network or OSC destination, edit the appropriate fields in
+`nvs/nodeN.csv`, then regenerate and reflash the NVS partition. Firmware does
+not need to be rebuilt.
 
 To use broadcast delivery, set `osc_host` to the subnet broadcast address
 (e.g. `192.168.4.255`). `SO_BROADCAST` is always set on the UDP socket.
 
 ## Architecture
+
+### Source files
+
+| File | Description |
+|------|-------------|
+| `src/main.c` | Entry point; NVS init, driver init, task creation |
+| `src/config.h` | Pin assignments, ADC/FDM constants, `node_config_t`, `scan_result_t` |
+| `src/excitation.c/.h` | LEDC driver; `excitation_init()`, `excitation_start(freq)` |
+| `src/adc_read.c/.h` | ADC continuous mode (DMA); `adc_init()`, `adc_calibrate_fs()`, `adc_read_frame()` |
+| `src/adc_parse.c/.h` | Pure-C DMA frame parsing (`adc_parse_frame()`) and window accumulation (`window_accumulate()`) |
+| `src/fdm_math.c/.h` | NCO-based I/Q demodulation (`fdm_demod_magnitude()`), stdev (`fdm_stdev()`), GSR ordering (`fdm_gsr_ordering()`) |
+| `src/sensing_task.c/.h` | FreeRTOS task: calibrate, start excitation, run demod loop |
+| `src/network_task.c/.h` | FreeRTOS task: WiFi STA + UDP/OSC transmit |
+| `src/nvs_config.c/.h` | NVS read into `node_config_t` |
+| `src/globals.h` | `extern QueueHandle_t g_result_queue` |
 
 ### Dual-core split
 
@@ -103,115 +119,168 @@ To use broadcast delivery, set `osc_host` to the subnet broadcast address
 | Core 1 | `sensing_task` | 20 | 4096 bytes |
 | Core 0 | `network_task` | 5 | 8192 bytes |
 
-`sensing_task` owns excitation gating, SPI ADC reads, and I/Q demodulation.
+`sensing_task` owns ADC reads, FDM demodulation, and result production.
 `network_task` owns WiFi and UDP/OSC transmission. Results pass between them
 via a FreeRTOS queue (depth 4, items of type `scan_result_t`). If the queue is
-full when sensing completes a frame, the frame is dropped silently.
+full when sensing completes a window, the window is dropped silently.
 
 WiFi and lwIP tasks are pinned to Core 0 via `sdkconfig.defaults`
 (`CONFIG_ESP_WIFI_TASK_CORE_ID=0`, `CONFIG_LWIP_TASK_CORE_ID=0`), keeping
 Core 1 free of network interrupts.
 
+### Data structures
+
+```c
+/* node_config_t — loaded from NVS at boot */
+typedef struct {
+    uint8_t  node_id;
+    char     wifi_ssid[33];
+    char     wifi_pass[65];
+    char     osc_host[16];
+    uint16_t osc_port;
+    uint16_t base_k;      /* DFT bin for node 0; default 180 */
+    uint16_t step_k;      /* bin spacing between nodes; default 20 */
+    uint16_t window_n;    /* samples per demod window; default 1800 */
+} node_config_t;
+
+/* scan_result_t — produced by sensing_task, consumed by network_task */
+typedef struct {
+    float   self_stdev;       /* stdev of DC-removed window (self-presence metric) */
+    float   self_carrier_mag; /* I/Q magnitude at this node's own carrier */
+    float   gsr_mag[3];       /* I/Q magnitude at the 3 other carriers */
+    uint8_t gsr_node[3];      /* node IDs corresponding to gsr_mag[] */
+    uint8_t node_id;          /* this node's ID */
+} scan_result_t;
+```
+
 ### Startup sequence
 
 1. `nvs_flash_init()` → `nvs_config_load()` — fatal if NVS is unreadable
-2. `excitation_init()` — LEDC timer + channel, stopped
-3. `adc_init()` — `SPI2_HOST` bus + MCP3201 device
-4. `sync_init(is_leader)` — GPTimer (leader) or GPIO ISR (follower)
-5. Create result queue
-6. Start `network_task` on Core 0
-7. Start `sensing_task` on Core 1
+2. `excitation_init()` — LEDC timer + channel configured, not yet running
+3. `adc_init()` — ADC continuous mode (DMA) started; one frame discarded to
+   flush stale DMA data
+4. Create `g_result_queue`
+5. Start `network_task` on Core 0
+6. Start `sensing_task` on Core 1
 
-### TDM frame structure
+In `sensing_task` startup (before the main loop):
 
-One frame is 10 ms (100 Hz), divided into 10 slots of 1 ms each.
+- `adc_calibrate_fs()` — flush 5 stale frames, then time 200 DMA reads to
+  measure actual sample rate
+- Compute carrier bin `k_self = base_k + node_id * step_k` and excitation
+  frequency `f_exc = k_self * fs / N`
+- `excitation_start(f_exc)` — begin LEDC output
+- Precompute NCO step phasors for all 4 carrier bins
 
-- **Slots 0–3**: self-capacitance. Each node excites and reads its own
-  electrode in its assigned slot (node N in slot N).
-- **Slots 4–9**: cross-node GSR. One node excites; a different node reads.
+### Sensing loop
 
-Per-slot timing: 250 µs settling, 750 µs integration (~40 ADC samples at
-1 MHz SPI clock). The TX node holds excitation on until the full 1 ms slot
-elapses, so the RX node sees a stable signal during integration.
+Each iteration of the `while(1)` loop in `sensing_task`:
 
-GSR slot assignments:
+1. `adc_read_frame()` — block on DMA for one 2048-byte frame (~1024 samples)
+2. `adc_parse_frame()` — extract 12-bit samples from TYPE1 DMA bytes
+3. `window_accumulate()` — append samples to the rolling window buffer;
+   returns 1 when the window fills and copies it to a snapshot buffer
 
-| Slot | TX | RX |
-|------|----|----|
-| 4 | 0 | 1 |
-| 5 | 0 | 2 |
-| 6 | 0 | 3 |
-| 7 | 1 | 2 |
-| 8 | 1 | 3 |
-| 9 | 2 | 3 |
+   Carry-over: `window_accumulate` tracks position across calls, so samples
+   from a frame that spans a window boundary are correctly split between the
+   current and next window. The `_Static_assert` in `sensing_task.c` ensures
+   one DMA frame cannot fill more than one window, preventing snapshot
+   overwrites.
 
-Node 0 is never a GSR receiver; node 3 is a receiver in three slots. Each
-node populates only the `gsr_mag`/`gsr_phase` indices corresponding to its
-RX slots; unused indices remain 0.0.
+4. When `window_accumulate` returns 1 (window complete):
+   - `fdm_stdev()` — stdev of the snapshot (self-presence)
+   - `fdm_demod_magnitude()` × 4 — I/Q magnitude at each of the 4 carrier bins
+   - Populate `scan_result_t` and post to `g_result_queue`
 
-### Sync mechanism
+### FDM carrier allocation
 
-Leader: GPTimer alarm at 1 µs resolution fires every 10 ms. The IRAM ISR
-pulses GPIO 5 high for ~5 µs, then gives `g_sync_sem`. Follower: GPIO 5
-rising-edge ISR gives `g_sync_sem`. Both roles use the same sensing loop:
-`xSemaphoreTake(g_sync_sem, 15 ms timeout)`. Follower blocks with no output
-if no pulse arrives within the timeout and recovers automatically on the next
-pulse.
+Node carriers are assigned by NVS-configurable parameters. With defaults
+(`base_k=180`, `step_k=20`, `window_n=1800`):
 
-### Sample rate calibration
+| Node | bin k | Frequency (at ~180 ksps) |
+|------|-------|--------------------------|
+| 0 | 180 | ~18 kHz |
+| 1 | 200 | ~20 kHz |
+| 2 | 220 | ~22 kHz |
+| 3 | 240 | ~24 kHz |
 
-At startup, `sensing_task` times 500 back-to-back MCP3201 reads using the
-same `adc_read_into_buffer()` call path used during integration. The measured
-sample rate is divided by `SAMPLES_PER_CYCLE` (5) to derive the LEDC
-excitation frequency, guaranteeing an integer number of ADC samples per
-excitation cycle. The calibration result is logged at boot.
+Each node excites at its own frequency and demodulates all four bins from its
+ADC input. The three non-self bins measure cross-node (GSR) coupling.
 
 ### I/Q demodulation
 
-```c
-static const float COS_TABLE[5] = { 1.0f,  0.3090f, -0.8090f, -0.8090f,  0.3090f };
-static const float SIN_TABLE[5] = { 0.0f,  0.9511f,  0.5878f, -0.5878f, -0.9511f };
+`fdm_demod_magnitude` in `fdm_math.c` uses an incremental NCO rotation with
+internal DC removal (mean subtraction before accumulation) and renormalization
+every 64 samples to prevent floating-point drift:
 
+```c
+// cos_step = cos(2*PI*k/N),  sin_step = -sin(2*PI*k/N)
 float I = 0, Q = 0;
+float cos_n = 1.0f, sin_n = 0.0f;
+float mean = /* computed over samples */;
 for (int i = 0; i < n_samples; i++) {
-    float s = (float)samples[i] - 2048.0f;  // remove 12-bit midpoint DC
-    I += s * COS_TABLE[i % 5];
-    Q += s * SIN_TABLE[i % 5];
+    float s = (float)samples[i] - mean;
+    I += s * cos_n;
+    Q += s * sin_n;
+    // rotate NCO; renorm every 64 samples
 }
-float magnitude = sqrtf(I*I + Q*Q) / n_samples;
-float phase     = atan2f(Q, I);
+return sqrtf(I*I + Q*Q) / n_samples;
 ```
 
 ## OSC Output
 
-Each node sends one UDP/OSC packet per frame (100 Hz).
+Each node sends one UDP/OSC packet per completed window.
 
 | Field | Value |
 |-------|-------|
 | Address | `/shrine/node/N` (N = node_id, 0–3) |
-| Type tag | `fffffff` |
-| Float 0 | `self_cap_mag` |
-| Float 1 | `gsr_mag[0]` |
-| Float 2 | `gsr_mag[1]` |
-| Float 3 | `gsr_mag[2]` |
-| Float 4 | `gsr_phase[0]` |
-| Float 5 | `gsr_phase[1]` |
-| Float 6 | `gsr_phase[2]` |
+| Type tag | `fffff` |
+| Float 0 | `self_stdev` — stdev of DC-removed window |
+| Float 1 | `self_carrier_mag` — I/Q magnitude at this node's own carrier |
+| Float 2 | `gsr_mag[0]` — I/Q magnitude at next node's carrier |
+| Float 3 | `gsr_mag[1]` — I/Q magnitude at node+2's carrier |
+| Float 4 | `gsr_mag[2]` — I/Q magnitude at node+3's carrier |
 
-`gsr_mag` and `gsr_phase` indices map to the node's RX slots in ascending slot
-order. Unused positions (node 0 has no GSR RX slots; node 1 has one) are 0.0.
-On SPI error the affected slot's values are `NaN`.
+`gsr_mag` indices use the `(node_id + offset) % NUM_NODES` convention
+(`offset` = 1, 2, 3). The receiver can reconstruct which physical node pair
+each index represents from this convention and the known node count (4).
 
-The receiver must consult the static GSR schedule to interpret which
-cross-node pair each `gsr_*` index represents.
+## Build Configuration
+
+### `platformio.ini`
+
+```ini
+[env:edge-node]
+platform = espressif32@6.9.0
+board = esp32dev
+framework = espidf
+board_build.partitions = partitions.csv
+board_build.flash_mode = dio
+board_build.flash_size = 4MB
+monitor_speed = 115200
+build_flags = -DCORE_DEBUG_LEVEL=3
+```
+
+### `sdkconfig.defaults`
+
+```
+CONFIG_ESP_WIFI_TASK_CORE_ID=0
+CONFIG_LWIP_TASK_CORE_ID=0
+CONFIG_BT_ENABLED=n
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+```
+
+Bluetooth is disabled to reduce memory pressure. `FREERTOS_HZ=1000` gives 1 ms
+tick resolution for FreeRTOS delays and timeouts.
 
 ## Error Handling
 
 | Condition | Behavior |
 |-----------|----------|
 | NVS read failure | `ESP_LOGE` + `esp_restart()` |
+| ADC calibration failure | `ESP_LOGE` + `esp_restart()` |
 | WiFi disconnect | Exponential backoff reconnect, 1 s initial, 30 s maximum |
-| Sync loss (follower) | Semaphore timeout after 15 ms; no output until next pulse |
-| SPI error | Affected slot values set to `NaN`; loop continues |
-| Result queue full | Frame dropped silently; no backpressure on sensing |
+| ADC read timeout | `ESP_LOGE`; loop continues on next iteration |
+| Result queue full | Window dropped silently; no backpressure on sensing |
 | UDP send failure | Logged at debug level; loop continues |

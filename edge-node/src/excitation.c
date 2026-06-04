@@ -8,13 +8,14 @@ static const char *TAG = "excitation";
 
 /*
  * LEDC configuration constants.
- * ESP32-S3 does not support LEDC_HIGH_SPEED_MODE; use LOW_SPEED_MODE only.
+ * ESP32-WROOM-32 supports LEDC_HIGH_SPEED_MODE (not available on ESP32-S3).
+ * 1-bit resolution maximises frequency divider precision for 18–24 kHz range.
  */
-#define EXCITATION_SPEED_MODE   LEDC_LOW_SPEED_MODE
+#define EXCITATION_SPEED_MODE   LEDC_HIGH_SPEED_MODE
 #define EXCITATION_TIMER        LEDC_TIMER_0
 #define EXCITATION_CHANNEL      LEDC_CHANNEL_0
-#define EXCITATION_DUTY_RES     LEDC_TIMER_8_BIT
-#define EXCITATION_DUTY_50PCT   128u  /* 128/256 = 50% */
+#define EXCITATION_DUTY_RES     LEDC_TIMER_1_BIT
+#define EXCITATION_DUTY_50PCT   1u    /* 1/2 = 50% duty cycle at 1-bit resolution */
 
 esp_err_t excitation_init(void)
 {
@@ -46,7 +47,7 @@ esp_err_t excitation_init(void)
         return err;
     }
 
-    ESP_LOGI(TAG, "LEDC initialised: timer=%d channel=%d gpio=%d (LOW_SPEED_MODE)",
+    ESP_LOGI(TAG, "LEDC initialised: timer=%d channel=%d gpio=%d (HIGH_SPEED_MODE)",
              EXCITATION_TIMER, EXCITATION_CHANNEL, PIN_EXCITATION);
     return ESP_OK;
 }
@@ -54,26 +55,15 @@ esp_err_t excitation_init(void)
 void excitation_start(uint32_t freq_hz)
 {
     /* Update frequency on the running timer. */
-    esp_err_t err = ledc_set_freq(EXCITATION_SPEED_MODE, EXCITATION_TIMER, freq_hz);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "ledc_set_freq(%lu) failed: %s", (unsigned long)freq_hz,
-                 esp_err_to_name(err));
-        return;
-    }
+    ESP_ERROR_CHECK(ledc_set_freq(EXCITATION_SPEED_MODE, EXCITATION_TIMER, freq_hz));
 
     /* Set 50% duty and apply. */
-    err = ledc_set_duty(EXCITATION_SPEED_MODE, EXCITATION_CHANNEL, EXCITATION_DUTY_50PCT);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "ledc_set_duty failed: %s", esp_err_to_name(err));
-        return;
-    }
-    err = ledc_update_duty(EXCITATION_SPEED_MODE, EXCITATION_CHANNEL);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "ledc_update_duty failed: %s", esp_err_to_name(err));
-        return;
-    }
+    ESP_ERROR_CHECK(ledc_set_duty(EXCITATION_SPEED_MODE, EXCITATION_CHANNEL, EXCITATION_DUTY_50PCT));
+    ESP_ERROR_CHECK(ledc_update_duty(EXCITATION_SPEED_MODE, EXCITATION_CHANNEL));
 
-    ESP_LOGI(TAG, "excitation started: %lu Hz, 50%% duty", (unsigned long)freq_hz);
+    uint32_t actual_hz = ledc_get_freq(EXCITATION_SPEED_MODE, EXCITATION_TIMER);
+    ESP_LOGI(TAG, "excitation started: requested=%lu Hz actual=%lu Hz, 50%% duty",
+             (unsigned long)freq_hz, (unsigned long)actual_hz);
 }
 
 void excitation_stop(void)

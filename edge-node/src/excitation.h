@@ -8,7 +8,7 @@
  * Configure LEDC timer and channel for excitation output.
  * Does not start the signal; call excitation_start() when ready.
  *
- * Uses LEDC_LOW_SPEED_MODE (required on ESP32-S3).
+ * Uses LEDC_HIGH_SPEED_MODE (required on ESP32, not available on ESP32-S3).
  * Timer 0, Channel 0, GPIO PIN_EXCITATION (GPIO 4).
  */
 esp_err_t excitation_init(void);

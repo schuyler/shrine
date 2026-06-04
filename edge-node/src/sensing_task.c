@@ -1,8 +1,8 @@
 /* sensing_task.c — FDM capacitive sensing loop.
  *
- * Acquires the SPI bus, calibrates sample rate, starts LEDC excitation at
+ * Calibrates ADC sample rate via DMA burst timing, starts LEDC excitation at
  * this node's carrier frequency, then runs a continuous demodulation loop:
- * collect one window of ADC samples, compute self-stdev and I/Q magnitudes
+ * accumulate DMA frames into a window, compute self-stdev and I/Q magnitudes
  * at all 4 carrier bins, post a scan_result_t to g_result_queue for
  * network_task.
  */
@@ -11,59 +11,41 @@
 #include "config.h"
 #include "excitation.h"
 #include "adc_read.h"
+#include "adc_parse.h"
 #include "fdm_math.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "esp_attr.h"
 #include "esp_log.h"
-#include "esp_timer.h"
-#include <math.h>   /* cosf, sinf, sqrtf */
+#include <math.h>   /* cosf, sinf */
 
 /* g_result_queue is declared in globals.h and defined in main.c */
 #include "globals.h"
 
 static const char *TAG = "sensing";
 
-/* -------------------------------------------------------------------------
- * Sample count for calibration pass.  More samples → more accurate rate
- * estimate, at the cost of a longer startup delay (~10 ms at 1 MHz SPI).
+/* Enforce single-fill-per-frame: one DMA frame (ADC_FRAME_SIZE/2 samples) must
+ * be smaller than one window (WINDOW_N_DEFAULT samples).  If this were violated,
+ * window_accumulate could return fills > 1 and intermediate windows would be
+ * overwritten in s_snapshot_buf before being processed.
  */
-#define CALIB_SAMPLES 500
+_Static_assert(ADC_FRAME_SIZE / 2 < WINDOW_N_DEFAULT,
+               "DMA frame must contain fewer samples than one window to avoid "
+               "dropping intermediate windows in the sensing loop");
 
-/* -------------------------------------------------------------------------
- * Calibration: measure actual ADC sample rate.
- * Called inside an already-acquired SPI bus — no internal acquire/release.
- * -------------------------------------------------------------------------*/
+/* DMA receive buffer — must be word-aligned for DMA */
+static WORD_ALIGNED_ATTR uint8_t s_dma_buf[ADC_FRAME_SIZE];
 
-static uint32_t calibrate_sample_rate(void)
-{
-    uint16_t buf[CALIB_SAMPLES];
+/* Rolling window accumulation buffer */
+static uint16_t s_window_buf[WINDOW_N_DEFAULT];
+static int s_window_pos = 0;
 
-    int64_t t0 = esp_timer_get_time();   /* µs */
-    bool calib_ok = adc_read_into_buffer(buf, CALIB_SAMPLES);
-    int64_t t1 = esp_timer_get_time();
+/* Snapshot of last completed window — processed after window_accumulate fills */
+static uint16_t s_snapshot_buf[WINDOW_N_DEFAULT];
 
-    if (!calib_ok) {
-        ESP_LOGW(TAG, "calibration: SPI errors during sampling — "
-                 "rate estimate may be unreliable");
-    }
-
-    int64_t elapsed_us = t1 - t0;
-    if (elapsed_us <= 0) {
-        ESP_LOGW(TAG, "calibration elapsed_us=%lld, using default 100000 Hz",
-                 elapsed_us);
-        return 100000;
-    }
-
-    /* samples_per_second = CALIB_SAMPLES / (elapsed_us / 1e6) */
-    uint32_t sample_rate = (uint32_t)(((int64_t)CALIB_SAMPLES * 1000000LL)
-                                      / elapsed_us);
-
-    ESP_LOGI(TAG, "calibration: %d samples in %lld µs → sample_rate=%lu Hz",
-             CALIB_SAMPLES, elapsed_us, sample_rate);
-
-    return sample_rate;
-}
+/* Parsed samples extracted from one DMA frame */
+static uint16_t s_frame_samples[ADC_FRAME_SIZE / 2];  /* max samples per frame */
 
 /* -------------------------------------------------------------------------
  * sensing_task
@@ -75,11 +57,14 @@ void sensing_task(void *param)
 
     ESP_LOGI(TAG, "starting on node %u", cfg->node_id);
 
-    /* --- Startup: acquire SPI bus for entire run ----------------------- */
-    adc_acquire();
-
-    /* --- Startup: calibrate sample rate (runs inside acquired bus) ----- */
-    uint32_t sample_rate = calibrate_sample_rate();
+    /* --- Startup: calibrate sample rate via DMA burst timing ----------- */
+    float fs;
+    esp_err_t cal_err = adc_calibrate_fs(&fs);
+    if (cal_err != ESP_OK) {
+        ESP_LOGE(TAG, "ADC calibration failed — restarting");
+        esp_restart();
+    }
+    uint32_t sample_rate = (uint32_t)fs;
 
     /* --- Startup: clamp window_n to static buffer size ----------------- */
     uint16_t N = cfg->window_n;
@@ -113,27 +98,47 @@ void sensing_task(void *param)
     fdm_gsr_ordering(cfg->node_id, NUM_NODES, result.gsr_node);
     result.node_id = cfg->node_id;
 
-    /* Static sample buffer (not stack-allocated) */
-    static uint16_t buf[WINDOW_N_DEFAULT];
-
     /* -------------------------------------------------------------------- */
     /* Main sensing loop                                                     */
     /* -------------------------------------------------------------------- */
     while (1) {
-        /* Fill one complete window */
-        bool ok = adc_read_into_buffer(buf, N);
-        if (!ok) {
-            ESP_LOGW(TAG, "adc_read_into_buffer failed — skipping window");
+        /* Read one DMA frame */
+        uint32_t bytes_read = 0;
+        esp_err_t err = adc_read_frame(s_dma_buf, &bytes_read, 1000);
+        if (err != ESP_OK || bytes_read == 0) {
+            ESP_LOGE(TAG, "adc_read_frame failed: %s", esp_err_to_name(err));
             continue;
         }
 
+        /* Extract 12-bit samples from the TYPE1 DMA frame */
+        int n_samples = adc_parse_frame(s_dma_buf, (int)bytes_read,
+                                        s_frame_samples,
+                                        (int)(sizeof(s_frame_samples) / sizeof(s_frame_samples[0])));
+        if (n_samples <= 0) {
+            continue;
+        }
+
+        /* Accumulate into rolling window; snapshot is copied when window fills */
+        int fills = window_accumulate(s_window_buf, (int)N, &s_window_pos,
+                                      s_frame_samples, n_samples,
+                                      s_snapshot_buf);
+
+        /* fills is always 0 or 1 given the _Static_assert above */
+        if (fills <= 0) {
+            /* Window not yet full — keep accumulating */
+            continue;
+        }
+
+        /* Process the most recently completed window snapshot */
+
         /* Stdev (DC-removed, self-presence metric) */
-        result.self_stdev = fdm_stdev(buf, N);
+        result.self_stdev = fdm_stdev(s_snapshot_buf, N);
 
         /* I/Q demodulation at all 4 carriers */
         float mag[NUM_NODES];
         for (int c = 0; c < NUM_NODES; c++) {
-            mag[c] = fdm_demod_magnitude(buf, N, nco_cos_step[c], nco_sin_step[c]);
+            mag[c] = fdm_demod_magnitude(s_snapshot_buf, N,
+                                         nco_cos_step[c], nco_sin_step[c]);
         }
 
         /* Extract self-carrier magnitude */

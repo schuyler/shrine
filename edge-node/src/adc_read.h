@@ -2,47 +2,52 @@
 #define ADC_READ_H
 
 #include <stdint.h>
-#include <stdbool.h>
 #include "esp_err.h"
 
 /**
- * Initialise the ADC subsystem.
+ * Initialise ADC continuous mode on ADC1_CH0 (GPIO36).
  *
- * When USE_INTERNAL_ADC is defined, configures ESP32-S3 oneshot ADC on
- * ADC1_CH0 (GPIO 1).  Otherwise, configures SPI2_HOST for the MCP3201
- * external ADC using pins from config.h.
+ * Configures adc_continuous_new_handle(), single channel, TYPE1 output
+ * format, 220 ksps requested (actual ~180 ksps after I2S 9/11 ratio).
+ * Starts conversion and discards the first frame to flush stale DMA data.
+ *
+ * Must be called once before adc_calibrate_fs() or adc_read_frame().
  */
 esp_err_t adc_init(void);
 
 /**
- * Acquire exclusive access to the ADC for tight-loop polling.
- * Must be called before adc_read_sample() / adc_read_into_buffer().
+ * Calibrate the actual ADC sample rate by timing DMA burst reads.
+ *
+ * Flushes 5 frames, then reads CAL_BURST_READS (200) frames and divides
+ * total samples by elapsed time.
+ *
+ * Uses a static internal buffer. Must be called from a single task context
+ * during startup; not reentrant.
+ *
+ * @param fs_out  Output: measured sample rate in Hz.
+ * @return ESP_OK on success, ESP_FAIL if no data was received.
  */
-void adc_acquire(void);
+esp_err_t adc_calibrate_fs(float *fs_out);
 
 /**
- * Read a single 12-bit ADC sample.
+ * Read one DMA frame into buf.
  *
- * Must be called between adc_acquire() and adc_release().
+ * Blocks up to timeout_ms waiting for data. On success, *bytes_read
+ * contains the number of bytes written to buf (always <= ADC_FRAME_SIZE).
  *
- * @return 12-bit sample value (0-4095), or 0 on failure.
+ * buf must be at least ADC_FRAME_SIZE bytes and word-aligned (WORD_ALIGNED_ATTR).
+ *
+ * @param buf          Destination buffer (WORD_ALIGNED_ATTR uint8_t[ADC_FRAME_SIZE]).
+ * @param bytes_read   Output: bytes actually read.
+ * @param timeout_ms   Timeout in milliseconds.
+ * @return ESP_OK on success, ESP_ERR_TIMEOUT, or other IDF error.
  */
-uint16_t adc_read_sample(void);
+esp_err_t adc_read_frame(uint8_t *buf, uint32_t *bytes_read, uint32_t timeout_ms);
 
 /**
- * Fill buf with count 12-bit samples via a tight polling loop.
- *
- * Must be called between adc_acquire() and adc_release().
- *
- * @param buf    Destination array (must hold at least count elements).
- * @param count  Number of samples to read.
- * @return true if all samples were read successfully, false on failure.
+ * Stop ADC continuous conversion and release the handle.
+ * Safe to call even if adc_init() was not called.
  */
-bool adc_read_into_buffer(uint16_t *buf, int count);
-
-/**
- * Release the ADC acquired by adc_acquire().
- */
-void adc_release(void);
+void adc_stop(void);
 
 #endif /* ADC_READ_H */

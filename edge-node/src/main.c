@@ -1,6 +1,7 @@
 /* main.c — FDM edge-node firmware entry point.
  *
- * Initializes NVS, loads node_config_t, initializes excitation and ADC drivers,
+ * Initializes NVS, loads node_config_t, initializes excitation and ADC continuous
+ * mode drivers,
  * creates g_result_queue, then launches network_task (Core 0) and
  * sensing_task (Core 1).
  */
@@ -52,7 +53,7 @@ void app_main(void)
     /* 3. Excitation driver */
     ESP_ERROR_CHECK(excitation_init());
 
-    /* 4. ADC / SPI driver */
+    /* 4. ADC continuous mode driver */
     ESP_ERROR_CHECK(adc_init());
 
     /* 5. Result queue */

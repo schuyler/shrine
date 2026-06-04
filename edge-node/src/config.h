@@ -7,10 +7,16 @@
  * Pin definitions
  * -------------------------------------------------------------------------*/
 
-#define PIN_EXCITATION      4   /* LEDC PWM output */
-#define PIN_SPI_CLK        12   /* SPI2_HOST clock */
-#define PIN_SPI_MISO       13   /* MCP3201 D_out */
-#define PIN_SPI_CS         10   /* Software CS */
+#define PIN_EXCITATION      4           /* LEDC PWM output */
+#define PIN_ADC             GPIO_NUM_36 /* ADC1_CH0 on ESP32-WROOM-32 */
+
+/* ---------------------------------------------------------------------------
+ * ADC continuous mode (ESP32-WROOM-32 internal ADC via DMA)
+ * -------------------------------------------------------------------------*/
+
+#define ADC_SAMPLE_RATE     220000  /* requested; actual ~180 ksps (I2S 9/11 ratio) */
+#define ADC_FRAME_SIZE      2048    /* DMA frame size in bytes; 1024 samples x 2 bytes */
+#define ADC_POOL_SIZE       8192    /* DMA ring buffer size in bytes */
 
 /* ---------------------------------------------------------------------------
  * FDM window and carrier parameters
@@ -21,12 +27,6 @@
 #define STEP_K_DEFAULT        20    /* bin spacing between nodes */
 #define NUM_NODES               4
 #define NCO_RENORM_INTERVAL    64   /* informational — fdm_math.c hardcodes this */
-
-/* ---------------------------------------------------------------------------
- * SPI
- * -------------------------------------------------------------------------*/
-
-#define SPI_CLOCK_HZ    1000000 /* 1 MHz */
 
 /* ---------------------------------------------------------------------------
  * Task configuration
