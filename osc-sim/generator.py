@@ -30,6 +30,19 @@ class BroadcastUDPClient(SimpleUDPClient):
 # GSR pairs: all unique combinations of pads 1-4
 GSR_PAIRS = [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)]
 
+# Node N GSR slots → global pair indices (mirrors leds/sensor_state.py)
+# GSR_PAIRS uses 1-indexed pad IDs: [(1,2), (1,3), (1,4), (2,3), (2,4), (3,4)]
+# Node 0 (pad 1) sees pads 2,3,4 → pairs (1,2),(1,3),(1,4) → indices 0,1,2
+# Node 1 (pad 2) sees pads 3,4,1 → pairs (2,3),(2,4),(1,2) → indices 3,4,0
+# Node 2 (pad 3) sees pads 4,1,2 → pairs (3,4),(1,3),(2,3) → indices 5,1,3
+# Node 3 (pad 4) sees pads 1,2,3 → pairs (1,4),(2,4),(3,4) → indices 2,4,5
+NODE_GSR_MAPPING = [[0, 1, 2], [3, 4, 0], [5, 1, 3], [2, 4, 5]]
+
+# Scale normalized 0-1 values to approximate firmware ranges
+STDEV_SCALE = 1000.0      # stdev: 0-1 → 0-1000 (firmware: ~400-1300)
+CARRIER_MAG_SCALE = 200.0  # carrier mag: 0-1 → 0-200
+GSR_MAG_SCALE = 50.0       # gsr mag: 0-1 → 0-50
+
 # Incommensurate frequencies for organic noise layering (Hz)
 NOISE_FREQS = [0.1, 0.23, 0.37, 0.71]
 NOISE_AMPS = [0.03, 0.025, 0.02, 0.02]
@@ -256,6 +269,9 @@ def build_channels(smoothing_rate: float = 0.02) -> dict:
 def send_osc(clients: list, channels: dict, t: float, noise: bool = True) -> dict:
     """Send all OSC messages for the current tick to all clients.
 
+    Sends one /shrine/node/{n} message per node (0-3), each with 5 floats:
+    (stdev, carrier_mag, gsr_mag[0], gsr_mag[1], gsr_mag[2]).
+
     Callers must call channel.update(t) for all channels before invoking this
     function. send_osc reads .current (post-noise value computed by update())
     rather than calling update() itself, to avoid double-updating channels.
@@ -267,7 +283,7 @@ def send_osc(clients: list, channels: dict, t: float, noise: bool = True) -> dic
         noise: If True, add organic noise on top of channel values.
 
     Returns:
-        Dict mapping OSC address strings to the float values that were sent.
+        Dict mapping OSC address strings to the 5-float payload lists that were sent.
     """
     sent = {}
 
@@ -277,19 +293,24 @@ def send_osc(clients: list, channels: dict, t: float, noise: bool = True) -> dic
             v += layered_noise(t, channels[key].noise_offset)
         return max(0.0, min(1.0, v))
 
-    for i in range(1, 5):
-        val = _val(("cap", i))
-        for client in clients:
-            client.send_message(f"/pad/{i}/cap", float(val))
-        sent[f"/pad/{i}/cap"] = val
+    for node_id in range(4):
+        pad = node_id + 1  # cap channels are 1-indexed
+        cap_val = _val(("cap", pad))
 
-    for pair in GSR_PAIRS:
-        i, j = pair
-        mag = _val(("gsr_mag", pair))
+        stdev = cap_val * STDEV_SCALE
+        carrier_mag = cap_val * CARRIER_MAG_SCALE
+
+        gsr_mags = []
+        for global_idx in NODE_GSR_MAPPING[node_id]:
+            pair = GSR_PAIRS[global_idx]
+            gsr_mags.append(_val(("gsr_mag", pair)) * GSR_MAG_SCALE)
+
+        address = f"/shrine/node/{node_id}"
+        args = [stdev, carrier_mag] + gsr_mags
 
         for client in clients:
-            client.send_message(f"/gsr/{i}/{j}", float(mag))
-        sent[f"/gsr/{i}/{j}"] = mag
+            client.send_message(address, args)
+        sent[address] = args
 
     return sent
 
@@ -298,16 +319,20 @@ def print_summary(sent: dict, scenario: ArcScenario, t: float):
     """Print a single-line summary of the values actually sent over OSC.
 
     Args:
-        sent: Dict returned by send_osc mapping OSC addresses to sent values.
+        sent: Dict returned by send_osc mapping OSC addresses to 5-float payload lists.
         scenario: Active scenario (for phase name).
         t: Current time in seconds.
     """
-    caps = " ".join(f"{sent.get(f'/pad/{i}/cap', 0.0):.2f}" for i in range(1, 5))
-    gsrs = " ".join(
-        f"{sent.get(f'/gsr/{i}/{j}', 0.0):.2f}" for i, j in GSR_PAIRS
-    )
+    parts = []
+    for node_id in range(4):
+        address = f"/shrine/node/{node_id}"
+        args = sent.get(address, [0.0] * 5)
+        stdev = args[0]
+        gsrs = " ".join(f"{v:.1f}" for v in args[2:])
+        parts.append(f"n{node_id}:{stdev:.0f}[{gsrs}]")
+    nodes_str = " ".join(parts)
     print(
-        f"\r[{t:7.1f}s] {scenario.phase_name():12s} | cap: {caps} | gsr: {gsrs}",
+        f"\r[{t:7.1f}s] {scenario.phase_name():12s} | {nodes_str}",
         end="",
         flush=True,
     )
