@@ -91,7 +91,7 @@ def main():
     create_symlinks(mapping, args.path)
 
     for node_id, device in sorted(mapping.items()):
-        print(f"node {node_id} -> {device}")
+        print(f"{device} -> {args.path}/{node_id}")
 
 
 if __name__ == "__main__":

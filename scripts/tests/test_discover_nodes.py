@@ -286,8 +286,8 @@ class TestCli:
              patch("sys.stdout", captured):
             main()
         output = captured.getvalue()
-        assert "1" in output
         assert "/dev/ttyUSB0" in output
+        assert "/tmp/shrine/node/1" in output
 
     def test_exits_nonzero_when_no_devices(self):
         mock_find = MagicMock(return_value=[])
