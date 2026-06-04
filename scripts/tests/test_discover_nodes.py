@@ -132,6 +132,18 @@ class TestReadNodeId:
         assert device_arg == "/dev/ttyUSB0"
         assert baud_arg == 115200
 
+    def test_parses_fdm_bench_format(self):
+        """fdm-bench firmware logs 'node=N k=...' without ESP log tag."""
+        lines = [
+            "I (334) fdm-bench: nvs_flash_init: ESP_OK (0x0)\r\n",
+            "node=3 k=550 f_exc_req=54999.8 f_exc_actual=55006 fs=179999.3\r\n",
+            "mag=51.2 sd=685 mean=1643 n=1800\r\n",
+        ]
+        mock_serial = _make_serial_mock(lines)
+        with patch("serial.Serial", return_value=mock_serial):
+            result = read_node_id("/dev/ttyUSB0", timeout=5.0)
+        assert result == 3
+
     def test_skips_non_matching_lines_before_match(self):
         lines = [
             "I (100) boot: ESP-IDF v5.1\r\n",

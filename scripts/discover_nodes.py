@@ -11,9 +11,11 @@ import serial.tools.list_ports
 CP210X_VID = 0x10C4
 CP210X_PID = 0xEA60
 
-# Coupled to the ESP-IDF log tag in edge-node/src/main.c (line 48).
-# Same pattern used in edge-node/test/test_on_device.py.
-NODE_ID_RE = re.compile(r"main: node_id=(\d+)")
+# Matches both firmware variants:
+#   edge-node/src/main.c:48  — "main: node_id=0 base_k=..."
+#   fdm-bench/src/main.c:300 — "node=3 k=550 ..."
+# Word boundary (\b) prevents matching substrings like "num_nodes=".
+NODE_ID_RE = re.compile(r"\bnode(?:_id)?=(\d+)")
 
 
 def find_esp32_ports() -> list:
