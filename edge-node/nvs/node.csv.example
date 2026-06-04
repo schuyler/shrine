@@ -1,8 +1,8 @@
 key,type,encoding,value
 shrine,namespace,,
-node_id,data,u8,2
+node_id,data,u8,0
 leader,data,u8,0
-wifi_ssid,data,string,shrine-net
-wifi_pass,data,string,secretpass
+wifi_ssid,data,string,your-ssid
+wifi_pass,data,string,your-password
 osc_host,data,string,192.168.4.255
 osc_port,data,u16,57120

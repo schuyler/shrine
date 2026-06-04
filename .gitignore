@@ -33,5 +33,9 @@ Thumbs.db
 # Local config
 .envrc.local
 
+# NVS provisioning CSVs (contain WiFi credentials)
+**/nvs/*.csv
+!**/nvs/*.csv.example
+
 # Audio samples -- don't check these into Git (at least not yet)
 sc/samples/
