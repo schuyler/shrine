@@ -6,6 +6,7 @@
 #include "freertos/queue.h"
 #include "freertos/timers.h"
 
+#include "esp_check.h"
 #include "esp_log.h"
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -85,7 +86,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
  * WiFi init
  * -------------------------------------------------------------------------*/
 
-static esp_err_t wifi_init(const node_config_t *cfg)
+esp_err_t wifi_init(const node_config_t *cfg)
 {
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "esp_netif_init");
     ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), TAG,
@@ -166,14 +167,8 @@ void network_task(void *param)
 
     ESP_LOGI(TAG, "starting on node %u", cfg->node_id);
 
-    /* --- Init WiFi ------------------------------------------------------ */
-    esp_err_t ret = wifi_init(cfg);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "wifi_init failed: %s — network task halting",
-                 esp_err_to_name(ret));
-        vTaskDelete(NULL);
-        return;
-    }
+    /* WiFi was already initialized in app_main() before the ADC continuous
+     * driver started — see wifi_init() comment in network_task.h. */
 
     /* --- Create UDP socket --------------------------------------------- */
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);

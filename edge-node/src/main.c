@@ -50,20 +50,32 @@ void app_main(void)
              s_config.node_id, s_config.base_k, s_config.step_k, s_config.window_n,
              s_config.wifi_ssid, s_config.osc_host, s_config.osc_port);
 
-    /* 3. Excitation driver */
+    /* 3. WiFi — must complete before ADC continuous starts.
+     *    On ESP32 (ESP-IDF ≤5.3), the ADC continuous driver's I2S-DMA ISR
+     *    is unconditionally IRAM-flagged but calls flash-resident functions.
+     *    WiFi init disables the flash cache for PHY/NVS reads; if the ADC
+     *    ISR fires during that window, the chip panics. */
+    esp_err_t wifi_ret = wifi_init(&s_config);
+    if (wifi_ret != ESP_OK) {
+        ESP_LOGE(TAG, "wifi_init failed: %s — restarting",
+                 esp_err_to_name(wifi_ret));
+        esp_restart();
+    }
+
+    /* 4. Excitation driver */
     ESP_ERROR_CHECK(excitation_init());
 
-    /* 4. ADC continuous mode driver */
+    /* 5. ADC continuous mode driver */
     ESP_ERROR_CHECK(adc_init());
 
-    /* 5. Result queue */
+    /* 6. Result queue */
     g_result_queue = xQueueCreate(RESULT_QUEUE_DEPTH, sizeof(scan_result_t));
     if (g_result_queue == NULL) {
         ESP_LOGE(TAG, "failed to create result queue — restarting");
         esp_restart();
     }
 
-    /* 6. Network task (Core 0) */
+    /* 7. Network task (Core 0) */
     BaseType_t task_ret = xTaskCreatePinnedToCore(
         network_task,
         "network",
@@ -77,7 +89,7 @@ void app_main(void)
         esp_restart();
     }
 
-    /* 7. Sensing task (Core 1) */
+    /* 8. Sensing task (Core 1) */
     task_ret = xTaskCreatePinnedToCore(
         sensing_task,
         "sensing",
