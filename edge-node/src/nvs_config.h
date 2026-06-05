@@ -11,9 +11,10 @@
  *                osc_port (u16).
  * Optional keys (use defaults if absent): base_k (u16, default 180),
  *                step_k (u16, default 20), window_n (u16, default 1800),
- *                scale_stdev (u16, default 1000), scale_gsr0 (u16, default 1000),
- *                scale_gsr1 (u16, default 1000), scale_gsr2 (u16, default 1000).
- *                Scale factors are fixed-point: 1000 = 1.0×.
+ *                floor_stdev (u16, default 0), floor_gsr0-2 (u16, default 0),
+ *                scale_stdev (u16, default 1000), scale_gsr0-2 (u16, default 1000).
+ *                Floors are subtracted from raw values; scales are fixed-point
+ *                (1000 = 1.0×).
  *
  * Returns ESP_OK on success.  The caller should treat any other return value
  * as fatal and restart the device.

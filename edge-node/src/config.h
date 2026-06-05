@@ -28,6 +28,10 @@
 #define NUM_NODES               4
 #define NCO_RENORM_INTERVAL    64   /* informational — fdm_math.c hardcodes this */
 
+/* Calibration NVS defaults */
+#define CAL_FLOOR_DEFAULT       0   /* no floor subtraction */
+#define CAL_SCALE_DEFAULT    1000   /* 1.0× (fixed-point: value / 1000) */
+
 /* ---------------------------------------------------------------------------
  * Task configuration
  * -------------------------------------------------------------------------*/
@@ -53,6 +57,10 @@ typedef struct {
     uint16_t base_k;        /* DFT bin for node 0 (NVS optional, default 180) */
     uint16_t step_k;        /* bin spacing (NVS optional, default 20) */
     uint16_t window_n;      /* samples per window (NVS optional, default 1800) */
+    uint16_t floor_stdev;   /* calibration floor (NVS optional, default 0) */
+    uint16_t floor_gsr0;    /* calibration floor (NVS optional, default 0) */
+    uint16_t floor_gsr1;    /* calibration floor (NVS optional, default 0) */
+    uint16_t floor_gsr2;    /* calibration floor (NVS optional, default 0) */
     uint16_t scale_stdev;   /* calibration scale × 1000 (NVS optional, default 1000) */
     uint16_t scale_gsr0;    /* calibration scale × 1000 (NVS optional, default 1000) */
     uint16_t scale_gsr1;    /* calibration scale × 1000 (NVS optional, default 1000) */
