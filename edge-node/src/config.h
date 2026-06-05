@@ -53,6 +53,10 @@ typedef struct {
     uint16_t base_k;        /* DFT bin for node 0 (NVS optional, default 180) */
     uint16_t step_k;        /* bin spacing (NVS optional, default 20) */
     uint16_t window_n;      /* samples per window (NVS optional, default 1800) */
+    uint16_t scale_stdev;   /* calibration scale × 1000 (NVS optional, default 1000) */
+    uint16_t scale_gsr0;    /* calibration scale × 1000 (NVS optional, default 1000) */
+    uint16_t scale_gsr1;    /* calibration scale × 1000 (NVS optional, default 1000) */
+    uint16_t scale_gsr2;    /* calibration scale × 1000 (NVS optional, default 1000) */
 } node_config_t;
 
 typedef struct {

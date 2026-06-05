@@ -1,4 +1,5 @@
 #include "nvs_config.h"
+#include "calibration.h"
 
 #include <string.h>
 #include "nvs.h"
@@ -90,9 +91,52 @@ esp_err_t nvs_config_load(node_config_t *config)
         goto done;
     }
 
+    /* scale_stdev (optional — defaults to CAL_SCALE_DEFAULT = 1000 = 1.0×) */
+    config->scale_stdev = CAL_SCALE_DEFAULT;
+    err = nvs_get_u16(handle, "scale_stdev", &config->scale_stdev);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK;
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "read scale_stdev: %s", esp_err_to_name(err));
+        goto done;
+    }
+
+    /* scale_gsr0 (optional) */
+    config->scale_gsr0 = CAL_SCALE_DEFAULT;
+    err = nvs_get_u16(handle, "scale_gsr0", &config->scale_gsr0);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK;
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "read scale_gsr0: %s", esp_err_to_name(err));
+        goto done;
+    }
+
+    /* scale_gsr1 (optional) */
+    config->scale_gsr1 = CAL_SCALE_DEFAULT;
+    err = nvs_get_u16(handle, "scale_gsr1", &config->scale_gsr1);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK;
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "read scale_gsr1: %s", esp_err_to_name(err));
+        goto done;
+    }
+
+    /* scale_gsr2 (optional) */
+    config->scale_gsr2 = CAL_SCALE_DEFAULT;
+    err = nvs_get_u16(handle, "scale_gsr2", &config->scale_gsr2);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK;
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "read scale_gsr2: %s", esp_err_to_name(err));
+        goto done;
+    }
+
     ESP_LOGI(TAG, "config loaded: node_id=%u base_k=%u step_k=%u window_n=%u ssid=%s osc=%s:%u",
              config->node_id, config->base_k, config->step_k, config->window_n,
              config->wifi_ssid, config->osc_host, config->osc_port);
+    ESP_LOGI(TAG, "scale factors: stdev=%u gsr0=%u gsr1=%u gsr2=%u",
+             config->scale_stdev, config->scale_gsr0,
+             config->scale_gsr1, config->scale_gsr2);
 
 done:
     nvs_close(handle);

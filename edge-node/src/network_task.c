@@ -1,5 +1,6 @@
 #include "network_task.h"
 #include "config.h"
+#include "calibration.h"
 #include "globals.h"
 
 #include "freertos/FreeRTOS.h"
@@ -133,18 +134,20 @@ esp_err_t wifi_init(const node_config_t *cfg)
 #define OSC_BUF_SIZE 128
 
 static void send_osc(int sock, const struct sockaddr_in *dest,
-                     const node_config_t *cfg, const scan_result_t *result)
+                     const node_config_t *cfg,
+                     const float cal_values[CAL_NUM_CHANNELS],
+                     float carrier_mag)
 {
     char addr[32];
     snprintf(addr, sizeof(addr), "/shrine/node/%u", cfg->node_id);
 
     char buf[OSC_BUF_SIZE];
     int  len = tosc_writeMessage(buf, sizeof(buf), addr, "fffff",
-                                 result->self_stdev,
-                                 result->self_carrier_mag,
-                                 result->gsr_mag[0],
-                                 result->gsr_mag[1],
-                                 result->gsr_mag[2]);
+                                 cal_values[0],     /* calibrated self_stdev */
+                                 carrier_mag,        /* passthrough */
+                                 cal_values[1],      /* calibrated gsr_mag[0] */
+                                 cal_values[2],      /* calibrated gsr_mag[1] */
+                                 cal_values[3]);     /* calibrated gsr_mag[2] */
     if (len < 0) {
         ESP_LOGD(TAG, "tosc_writeMessage: buffer too small");
         return;
@@ -190,11 +193,18 @@ void network_task(void *param)
     ESP_LOGI(TAG, "UDP socket ready, sending OSC to %s:%u",
              cfg->osc_host, cfg->osc_port);
 
+    /* --- Calibration state ---------------------------------------------- */
+    cal_state_t cal;
+    calibration_init(&cal, cfg);
+
     /* --- Main loop ----------------------------------------------------- */
     scan_result_t result;
+    float cal_values[CAL_NUM_CHANNELS];
+    float carrier_mag;
     while (1) {
         if (xQueueReceive(g_result_queue, &result, portMAX_DELAY) == pdTRUE) {
-            send_osc(sock, &dest, cfg, &result);
+            calibration_apply(&cal, &result, cal_values, &carrier_mag);
+            send_osc(sock, &dest, cfg, cal_values, carrier_mag);
         }
     }
 }

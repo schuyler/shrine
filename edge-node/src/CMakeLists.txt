@@ -6,6 +6,7 @@ idf_component_register(
         "adc_parse.c"
         "fdm_math.c"
         "sensing_task.c"
+        "calibration.c"
         "network_task.c"
         "main.c"
     INCLUDE_DIRS "."
