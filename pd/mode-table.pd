@@ -1,0 +1,7 @@
+#N canvas 0 0 760 360 12;
+#X text 20 16 mode-table.pd -- major pentatonic MIDI notes {0 2 4 7 9} across range 36-93.;
+#X text 20 34 Fills array 'mode-notes' at load. Melodic voices read it with [tabread mode-notes].;
+#X obj 30 80 loadbang;
+#X msg 30 115 \; mode-notes 0 36 38 40 43 45 48 50 52 55 57 60 62 64 67 69 72 74 76 79 81 84 86 88 91 93;
+#X obj 30 170 table mode-notes 32;
+#X connect 2 0 3 0;
