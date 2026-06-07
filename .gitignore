@@ -42,5 +42,8 @@ Thumbs.db
 **/nvs/*.csv
 !**/nvs/*.csv.example
 
+# WLED firmware binaries (downloaded, not source)
+wled/*.bin
+
 # Audio samples -- don't check these into Git (at least not yet)
 sc/samples/
