@@ -5,4 +5,6 @@ rsync -avz \
     --exclude='*.pyc' \
     --exclude='.pio/' \
     --exclude='.DS_Store' \
+    --exclude='nvs/*.csv' \
+    --exclude='wled/*.bin' \
     ./ corazon:shrine/

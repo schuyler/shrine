@@ -1,7 +1,9 @@
 #!/bin/bash
 # Flash WLED firmware to an ESP32.
 #
-# Usage: ./install-wled.sh <firmware.bin>
+# Usage: ./install-wled.sh [firmware.bin]
+#
+# Defaults to WLED_16.0.0_ESP32.bin if no argument given.
 #
 # Requires: bootloader (esp32_bootloader_v4.bin) and partition table
 # (partitions.bin) in the same directory. Generate partitions.bin from
@@ -17,13 +19,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOOTLOADER="$SCRIPT_DIR/esp32_bootloader_v4.bin"
 PARTITIONS="$SCRIPT_DIR/partitions.bin"
-
-if [ $# -ne 1 ]; then
-    echo "Usage: $0 <firmware.bin>" >&2
-    exit 1
-fi
-
-FIRMWARE="$1"
+FIRMWARE="${1:-$SCRIPT_DIR/WLED_16.0.0_ESP32.bin}"
 
 for f in "$BOOTLOADER" "$PARTITIONS" "$FIRMWARE"; do
     if [ ! -f "$f" ]; then
