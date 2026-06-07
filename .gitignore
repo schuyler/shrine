@@ -46,4 +46,4 @@ Thumbs.db
 wled/*.bin
 
 # Audio samples -- don't check these into Git (at least not yet)
-sc/samples/
+sounds/
