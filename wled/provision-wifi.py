@@ -13,6 +13,7 @@ Reference: https://www.improv-wifi.com/serial/
 import json
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 import serial
@@ -83,16 +84,19 @@ def read_packet(ser, timeout=10):
 
 
 def set_hostname(ip: str, hostname: str) -> bool:
-    """Set WLED mDNS hostname via JSON API."""
-    url = f"http://{ip}/json/cfg"
-    data = json.dumps({"id": {"mdns": hostname}}).encode()
-    req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"},
-    )
+    """Set WLED mDNS hostname via the settings form.
+
+    The /settings/wifi endpoint persists the config and triggers a
+    proper reboot. The /json/cfg endpoint saves but doesn't reload
+    the mDNS name on reboot.
+    """
+    url = f"http://{ip}/settings/wifi"
+    data = urllib.parse.urlencode({"CM": hostname}).encode()
+    req = urllib.request.Request(url, data=data)
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            result = json.loads(resp.read())
-            return result.get("success", False)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            return "settings saved" in body.lower()
     except Exception as e:
         print(f"Failed to set hostname: {e}", file=sys.stderr)
         return False
@@ -201,18 +205,7 @@ def main():
         print(f"Device found at {ip}")
         print(f"Setting mDNS hostname to '{hostname}'...")
         if set_hostname(ip, hostname):
-            print(f"Hostname set. Device will be reachable at {hostname}.local after reboot.")
-            # Reboot to apply hostname
-            try:
-                req = urllib.request.Request(
-                    f"http://{ip}/json",
-                    data=b'{"rb":true}',
-                    headers={"Content-Type": "application/json"},
-                )
-                urllib.request.urlopen(req, timeout=5)
-                print("Rebooting device...")
-            except Exception:
-                print("Reboot request sent.")
+            print(f"Hostname set. Device rebooting as {hostname}.local...")
         else:
             print("Failed to set hostname.", file=sys.stderr)
             sys.exit(1)
