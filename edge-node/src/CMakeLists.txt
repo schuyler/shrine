@@ -17,6 +17,7 @@ idf_component_register(
         esp_wifi
         esp_netif
         esp_event
+        mdns
         lwip
         esp_timer
         tinyosc
