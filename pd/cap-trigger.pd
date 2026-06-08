@@ -7,7 +7,7 @@
 #X text 22 82 sensor;
 #X text 182 81 note;
 #X obj 82 115 sig~;
-#X obj 82 145 lop~ 2;
+#X obj 82 145 lop~ 0.5;
 #X obj 82 175 snapshot~;
 #X obj 170 145 loadbang;
 #X obj 170 175 metro 50;
