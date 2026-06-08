@@ -1,7 +1,9 @@
+import time
+
 import pytest
 
 from leds.osc_input import build_dispatcher
-from leds.sensor_state import SensorState
+from leds.pad_state import PadState
 
 
 def _get_handler(dispatcher, address):
@@ -44,267 +46,189 @@ def _call(dispatcher, address, *args):
     handler(address, *args)
 
 
-class TestSimulatorCapHandlers:
-    def test_pad1_cap_updates_slot0(self):
-        state = SensorState()
+class TestCapHandler:
+    def test_cap_updates_correct_pad(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        _call(dispatcher, "/pad/1/cap", 0.8)
-        cap, _ = state.snapshot()
-        assert cap[0] == pytest.approx(0.8)
+        _call(dispatcher, "/leds/cap", 0, 0.8)
+        snapshots, _, _, _, _, _ = state.snapshot()
+        assert snapshots[0].cap == pytest.approx(0.8)
 
-    def test_pad2_cap_updates_slot1(self):
-        state = SensorState()
+    def test_cap_updates_pad1(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        _call(dispatcher, "/pad/2/cap", 0.5)
-        cap, _ = state.snapshot()
-        assert cap[1] == pytest.approx(0.5)
+        _call(dispatcher, "/leds/cap", 1, 0.5)
+        snapshots, _, _, _, _, _ = state.snapshot()
+        assert snapshots[1].cap == pytest.approx(0.5)
 
-    def test_pad3_cap_updates_slot2(self):
-        state = SensorState()
+    def test_cap_updates_pad2(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        _call(dispatcher, "/pad/3/cap", 0.3)
-        cap, _ = state.snapshot()
-        assert cap[2] == pytest.approx(0.3)
+        _call(dispatcher, "/leds/cap", 2, 0.3)
+        snapshots, _, _, _, _, _ = state.snapshot()
+        assert snapshots[2].cap == pytest.approx(0.3)
 
-    def test_pad4_cap_updates_slot3(self):
-        state = SensorState()
+    def test_cap_updates_pad3(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        _call(dispatcher, "/pad/4/cap", 0.1)
-        cap, _ = state.snapshot()
-        assert cap[3] == pytest.approx(0.1)
+        _call(dispatcher, "/leds/cap", 3, 0.1)
+        snapshots, _, _, _, _, _ = state.snapshot()
+        assert snapshots[3].cap == pytest.approx(0.1)
 
-    def test_pad1_cap_does_not_affect_other_slots(self):
-        state = SensorState()
+    def test_cap_does_not_affect_other_pads(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        _call(dispatcher, "/pad/1/cap", 0.9)
-        cap, _ = state.snapshot()
-        assert cap[1] == 0
-        assert cap[2] == 0
-        assert cap[3] == 0
+        _call(dispatcher, "/leds/cap", 0, 0.9)
+        snapshots, _, _, _, _, _ = state.snapshot()
+        assert snapshots[1].cap == 0.0
+        assert snapshots[2].cap == 0.0
+        assert snapshots[3].cap == 0.0
 
-
-class TestSimulatorGsrMagHandlers:
-    def test_gsr_1_2_updates_global_index_0(self):
-        state = SensorState()
+    def test_cap_value_correctness(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        _call(dispatcher, "/gsr/1/2", 0.7)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[0] == pytest.approx(0.7)
+        _call(dispatcher, "/leds/cap", 2, 0.42)
+        snapshots, _, _, _, _, _ = state.snapshot()
+        assert snapshots[2].cap == pytest.approx(0.42)
 
-    def test_gsr_1_3_updates_global_index_1(self):
-        state = SensorState()
+
+class TestHeartbeatHandler:
+    def test_heartbeat_updates_correct_pad(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        _call(dispatcher, "/gsr/1/3", 0.6)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[1] == pytest.approx(0.6)
+        _call(dispatcher, "/leds/heartbeat", 0, 1.2)
+        snapshots, _, _, _, _, _ = state.snapshot()
+        assert snapshots[0].heartbeat == pytest.approx(1.2)
 
-    def test_gsr_1_4_updates_global_index_2(self):
-        state = SensorState()
+    def test_heartbeat_updates_pad1(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        _call(dispatcher, "/gsr/1/4", 0.5)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[2] == pytest.approx(0.5)
+        _call(dispatcher, "/leds/heartbeat", 1, 0.8)
+        snapshots, _, _, _, _, _ = state.snapshot()
+        assert snapshots[1].heartbeat == pytest.approx(0.8)
 
-    def test_gsr_2_3_updates_global_index_3(self):
-        state = SensorState()
+    def test_heartbeat_does_not_affect_other_pads(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        _call(dispatcher, "/gsr/2/3", 0.4)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[3] == pytest.approx(0.4)
+        _call(dispatcher, "/leds/heartbeat", 2, 1.0)
+        snapshots, _, _, _, _, _ = state.snapshot()
+        assert snapshots[0].heartbeat == 0.0
+        assert snapshots[1].heartbeat == 0.0
+        assert snapshots[3].heartbeat == 0.0
 
-    def test_gsr_2_4_updates_global_index_4(self):
-        state = SensorState()
+
+class TestFluxHandler:
+    def test_flux_updates_correct_pad(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        _call(dispatcher, "/gsr/2/4", 0.3)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[4] == pytest.approx(0.3)
+        _call(dispatcher, "/leds/flux", 0, 0.7)
+        snapshots, _, _, _, _, _ = state.snapshot()
+        assert snapshots[0].flux == pytest.approx(0.7)
 
-    def test_gsr_3_4_updates_global_index_5(self):
-        state = SensorState()
+    def test_flux_updates_pad3(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        _call(dispatcher, "/gsr/3/4", 0.2)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[5] == pytest.approx(0.2)
+        _call(dispatcher, "/leds/flux", 3, 0.33)
+        snapshots, _, _, _, _, _ = state.snapshot()
+        assert snapshots[3].flux == pytest.approx(0.33)
 
-
-class TestEdgeNodeHandlerNode0:
-    """Node 0: NODE_GSR_MAPPING[0] = [0, 1, 2] — all 3 GSR slots active."""
-
-    def _send_node0(self, dispatcher, stdev, carrier_mag, m0, m1, m2):
-        _call(dispatcher, "/shrine/node/0", stdev, carrier_mag, m0, m1, m2)
-
-    def test_node0_updates_cap_slot0(self):
-        state = SensorState()
+    def test_flux_does_not_affect_other_pads(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        self._send_node0(dispatcher, 0.6, 0.0, 0.1, 0.2, 0.3)
-        cap, _ = state.snapshot()
-        assert cap[0] == pytest.approx(0.6)
+        _call(dispatcher, "/leds/flux", 1, 0.5)
+        snapshots, _, _, _, _, _ = state.snapshot()
+        assert snapshots[0].flux == 0.0
+        assert snapshots[2].flux == 0.0
+        assert snapshots[3].flux == 0.0
 
-    def test_node0_uses_stdev_as_cap(self):
-        state = SensorState()
+
+class TestProgramHandler:
+    def test_sets_program_name(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        self._send_node0(dispatcher, 0.42, 0.9, 0.1, 0.2, 0.3)
-        cap, _ = state.snapshot()
-        assert cap[0] == pytest.approx(0.42)
+        _call(dispatcher, "/leds/program", "breathe")
+        _, program, _, _, _, _ = state.snapshot()
+        assert program == "breathe"
 
-    def test_node0_updates_gsr_mag_global0(self):
-        state = SensorState()
+    def test_sets_different_program_name(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        self._send_node0(dispatcher, 0.0, 0.0, 0.11, 0.22, 0.33)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[0] == pytest.approx(0.11)
+        _call(dispatcher, "/leds/program", "pulse")
+        _, program, _, _, _, _ = state.snapshot()
+        assert program == "pulse"
 
-    def test_node0_updates_gsr_mag_global1(self):
-        state = SensorState()
+
+class TestPaletteHandler:
+    def test_sets_palette_name(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        self._send_node0(dispatcher, 0.0, 0.0, 0.11, 0.22, 0.33)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[1] == pytest.approx(0.22)
+        _call(dispatcher, "/leds/palette", "default")
+        _, _, palette, _, _, _ = state.snapshot()
+        assert palette == "default"
 
-    def test_node0_updates_gsr_mag_global2(self):
-        state = SensorState()
+    def test_sets_different_palette_name(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        self._send_node0(dispatcher, 0.0, 0.0, 0.11, 0.22, 0.33)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[2] == pytest.approx(0.33)
+        _call(dispatcher, "/leds/palette", "warm")
+        _, _, palette, _, _, _ = state.snapshot()
+        assert palette == "warm"
 
-    def test_node0_does_not_update_globals_3_4_5(self):
-        state = SensorState()
+
+class TestTempoHandler:
+    def test_sets_bpm(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        self._send_node0(dispatcher, 0.0, 0.0, 0.5, 0.5, 0.5)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[3] == 0
-        assert gsr_mag[4] == 0
-        assert gsr_mag[5] == 0
+        _call(dispatcher, "/leds/tempo", 120.0)
+        _, _, _, bpm, _, _ = state.snapshot()
+        assert bpm == pytest.approx(120.0)
 
-
-class TestEdgeNodeHandlerNode1:
-    """Node 1: NODE_GSR_MAPPING[1] = [3, 4, 0] — all 3 GSR slots map to globals 3, 4, 0."""
-
-    def _send_node1(self, dispatcher, stdev, carrier_mag, m0, m1, m2):
-        _call(dispatcher, "/shrine/node/1", stdev, carrier_mag, m0, m1, m2)
-
-    def test_node1_updates_cap_slot1(self):
-        state = SensorState()
+    def test_sync_time_is_positive(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        self._send_node1(dispatcher, 0.6, 0.0, 0.3, 0.4, 0.5)
-        cap, _ = state.snapshot()
-        assert cap[1] == pytest.approx(0.6)
+        before = time.monotonic()
+        _call(dispatcher, "/leds/tempo", 90.0)
+        after = time.monotonic()
+        _, _, _, _, sync_time, _ = state.snapshot()
+        assert sync_time >= before
+        assert sync_time <= after
 
-    def test_node1_updates_gsr_mag_global3(self):
-        state = SensorState()
+    def test_tempo_increments_gen(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        self._send_node1(dispatcher, 0.0, 0.0, 0.3, 0.4, 0.5)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[3] == pytest.approx(0.3)
+        _, _, _, _, _, gen_before = state.snapshot()
+        _call(dispatcher, "/leds/tempo", 100.0)
+        _, _, _, _, _, gen_after = state.snapshot()
+        assert gen_after == gen_before + 1
 
-    def test_node1_updates_gsr_mag_global4(self):
-        state = SensorState()
+    def test_tempo_gen_increments_each_call(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        self._send_node1(dispatcher, 0.0, 0.0, 0.3, 0.4, 0.5)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[4] == pytest.approx(0.4)
+        _call(dispatcher, "/leds/tempo", 100.0)
+        _call(dispatcher, "/leds/tempo", 110.0)
+        _, _, _, _, _, gen = state.snapshot()
+        assert gen == 2
 
-    def test_node1_updates_gsr_mag_global0(self):
-        state = SensorState()
+
+class TestOutOfRangePad:
+    def test_cap_unknown_pad_does_not_crash(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        self._send_node1(dispatcher, 0.0, 0.0, 0.3, 0.4, 0.5)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[0] == pytest.approx(0.5)
+        _call(dispatcher, "/leds/cap", 99, 0.5)
+        snapshots, _, _, _, _, _ = state.snapshot()
+        for snap in snapshots:
+            assert snap.cap == 0.0
 
-    def test_node1_does_not_update_globals_1_2_5(self):
-        state = SensorState()
+
+class TestDefaultHandler:
+    def test_unrecognized_address_does_not_crash(self):
+        state = PadState([0, 1, 2, 3])
         dispatcher = build_dispatcher(state)
-        self._send_node1(dispatcher, 0.0, 0.0, 0.5, 0.5, 0.5)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[1] == 0
-        assert gsr_mag[2] == 0
-        assert gsr_mag[5] == 0
-
-
-class TestEdgeNodeHandlerNode2:
-    """Node 2: NODE_GSR_MAPPING[2] = [5, 1, 3] — all 3 GSR slots map to globals 5, 1, 3."""
-
-    def _send_node2(self, dispatcher, stdev, carrier_mag, m0, m1, m2):
-        _call(dispatcher, "/shrine/node/2", stdev, carrier_mag, m0, m1, m2)
-
-    def test_node2_updates_cap_slot2(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node2(dispatcher, 0.5, 0.0, 0.4, 0.35, 0.25)
-        cap, _ = state.snapshot()
-        assert cap[2] == pytest.approx(0.5)
-
-    def test_node2_updates_gsr_mag_global5(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node2(dispatcher, 0.0, 0.0, 0.4, 0.35, 0.25)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[5] == pytest.approx(0.4)
-
-    def test_node2_updates_gsr_mag_global1(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node2(dispatcher, 0.0, 0.0, 0.4, 0.35, 0.25)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[1] == pytest.approx(0.35)
-
-    def test_node2_updates_gsr_mag_global3(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node2(dispatcher, 0.0, 0.0, 0.4, 0.35, 0.25)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[3] == pytest.approx(0.25)
-
-    def test_node2_does_not_update_globals_0_2_4(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node2(dispatcher, 0.0, 0.0, 0.5, 0.5, 0.5)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[0] == 0
-        assert gsr_mag[2] == 0
-        assert gsr_mag[4] == 0
-
-
-class TestEdgeNodeHandlerNode3:
-    """Node 3: NODE_GSR_MAPPING[3] = [2, 4, 5] — all 3 GSR slots map to globals 2, 4, 5."""
-
-    def _send_node3(self, dispatcher, stdev, carrier_mag, m0, m1, m2):
-        _call(dispatcher, "/shrine/node/3", stdev, carrier_mag, m0, m1, m2)
-
-    def test_node3_updates_cap_slot3(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, 0.7, 0.0, 0.1, 0.2, 0.3)
-        cap, _ = state.snapshot()
-        assert cap[3] == pytest.approx(0.7)
-
-    def test_node3_updates_gsr_mag_global2(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, 0.0, 0.0, 0.4, 0.5, 0.6)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[2] == pytest.approx(0.4)
-
-    def test_node3_updates_gsr_mag_global4(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, 0.0, 0.0, 0.4, 0.5, 0.6)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[4] == pytest.approx(0.5)
-
-    def test_node3_updates_gsr_mag_global5(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, 0.0, 0.0, 0.4, 0.5, 0.6)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[5] == pytest.approx(0.6)
-
-    def test_node3_does_not_update_globals_0_1_3(self):
-        state = SensorState()
-        dispatcher = build_dispatcher(state)
-        self._send_node3(dispatcher, 0.0, 0.0, 0.5, 0.5, 0.5)
-        _, gsr_mag = state.snapshot()
-        assert gsr_mag[0] == 0
-        assert gsr_mag[1] == 0
-        assert gsr_mag[3] == 0
+        # Invoking the default handler should not raise
+        if hasattr(dispatcher, "default_handler"):
+            try:
+                dispatcher.default_handler("/unknown/address", 1, 2, 3)
+            except Exception as exc:
+                pytest.fail(f"Default handler raised: {exc}")
+        else:
+            # If no default_handler attribute, just verify the dispatcher exists
+            assert dispatcher is not None

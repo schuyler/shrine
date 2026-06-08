@@ -4,12 +4,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from leds.mapping import SegmentParams
+from leds.programs import SegmentParams
 from leds.wled import WledClient
 
 
-def _make_segment(r=255, g=0, b=0, bri=200, fx=0, sx=128, ix=128):
-    return SegmentParams(color_r=r, color_g=g, color_b=b, bri=bri, fx=fx, sx=sx, ix=ix)
+def _make_segment(col=None, bri=200, fx=0, sx=128, ix=128, pal=0, on=True):
+    if col is None:
+        col = [[255, 0, 0]]
+    return SegmentParams(col=col, bri=bri, fx=fx, sx=sx, ix=ix, pal=pal, on=on)
 
 
 def _make_segments(n=4):
@@ -40,33 +42,83 @@ class TestWledClientSend:
         url = mock_post.call_args[0][0]
         assert url == "http://192.168.1.5:80/json/state"
 
-    def test_send_returns_true_on_success(self):
+    def test_send_returns_float_rtt_on_success(self):
         client = WledClient(host="192.168.1.5", port=80, timeout=1)
         with patch("leds.wled.requests.post") as mock_post:
             mock_post.return_value = MagicMock(status_code=200)
             result = client.send(_make_segments())
-        assert result is True
+        assert isinstance(result, float)
+        assert result >= 0.0
 
-    def test_send_request_body_format(self):
+    def test_send_rtt_uses_monotonic_time(self):
         client = WledClient(host="192.168.1.5", port=80, timeout=1)
-        segs = [_make_segment(r=10, g=20, b=30, bri=100, fx=5, sx=64, ix=200)]
+        call_times = [1000.0, 1000.025]  # 25 ms apart
+        with patch("leds.wled.time.monotonic", side_effect=call_times):
+            with patch("leds.wled.requests.post") as mock_post:
+                mock_post.return_value = MagicMock(status_code=200)
+                result = client.send(_make_segments())
+        assert result == pytest.approx(25.0)
+
+    def test_send_request_body_has_seg(self):
+        client = WledClient(host="192.168.1.5", port=80, timeout=1)
+        segs = [_make_segment(col=[[10, 20, 30]], bri=100, fx=5, sx=64, ix=200)]
         with patch("leds.wled.requests.post") as mock_post:
             mock_post.return_value = MagicMock(status_code=200)
             client.send(segs)
         _, kwargs = mock_post.call_args
         body = kwargs.get("json") or mock_post.call_args[1].get("json")
         assert "seg" in body
-        assert len(body["seg"]) == 1
+
+    def test_send_request_body_col_field(self):
+        client = WledClient(host="192.168.1.5", port=80, timeout=1)
+        segs = [_make_segment(col=[[10, 20, 30]], bri=100, fx=5, sx=64, ix=200)]
+        with patch("leds.wled.requests.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=200)
+            client.send(segs)
+        _, kwargs = mock_post.call_args
+        body = kwargs.get("json") or mock_post.call_args[1].get("json")
         seg = body["seg"][0]
         assert seg["col"] == [[10, 20, 30]]
+
+    def test_send_request_body_bri_fx_sx_ix(self):
+        client = WledClient(host="192.168.1.5", port=80, timeout=1)
+        segs = [_make_segment(col=[[10, 20, 30]], bri=100, fx=5, sx=64, ix=200)]
+        with patch("leds.wled.requests.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=200)
+            client.send(segs)
+        _, kwargs = mock_post.call_args
+        body = kwargs.get("json") or mock_post.call_args[1].get("json")
+        seg = body["seg"][0]
         assert seg["bri"] == 100
         assert seg["fx"] == 5
         assert seg["sx"] == 64
         assert seg["ix"] == 200
 
+    def test_send_request_body_pal_field(self):
+        client = WledClient(host="192.168.1.5", port=80, timeout=1)
+        segs = [_make_segment(pal=3)]
+        with patch("leds.wled.requests.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=200)
+            client.send(segs)
+        _, kwargs = mock_post.call_args
+        body = kwargs.get("json") or mock_post.call_args[1].get("json")
+        seg = body["seg"][0]
+        assert seg["pal"] == 3
+
+    def test_send_request_body_on_field(self):
+        client = WledClient(host="192.168.1.5", port=80, timeout=1)
+        segs = [_make_segment(on=False)]
+        with patch("leds.wled.requests.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=200)
+            client.send(segs)
+        _, kwargs = mock_post.call_args
+        body = kwargs.get("json") or mock_post.call_args[1].get("json")
+        seg = body["seg"][0]
+        assert seg["on"] is False
+
     def test_send_4_segments(self):
         client = WledClient(host="192.168.1.5", port=80, timeout=1)
-        segs = [_make_segment(r=i * 10, g=0, b=0) for i in range(4)]
+        segs = [_make_segment(col=[[i * 10, 0, 0]]) for i in range(4)]
         with patch("leds.wled.requests.post") as mock_post:
             mock_post.return_value = MagicMock(status_code=200)
             client.send(segs)
@@ -84,17 +136,17 @@ class TestWledClientSend:
 
 
 class TestWledClientFailures:
-    def test_timeout_returns_false(self):
+    def test_timeout_returns_none(self):
         client = WledClient(host="192.168.1.5", port=80, timeout=1)
         with patch("leds.wled.requests.post", side_effect=requests.Timeout()):
             result = client.send(_make_segments())
-        assert result is False
+        assert result is None
 
-    def test_connection_error_returns_false(self):
+    def test_connection_error_returns_none(self):
         client = WledClient(host="192.168.1.5", port=80, timeout=1)
         with patch("leds.wled.requests.post", side_effect=requests.ConnectionError()):
             result = client.send(_make_segments())
-        assert result is False
+        assert result is None
 
     def test_first_failure_logs_warning(self, caplog):
         client = WledClient(host="192.168.1.5", port=80, timeout=1)
@@ -116,14 +168,23 @@ class TestWledClientFailures:
         warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
         assert len(warning_records) == 0
 
-    def test_recovery_after_failure_returns_true(self):
+    def test_http_error_returns_none(self):
+        client = WledClient(host="192.168.1.5", port=80, timeout=1)
+        mock_resp = MagicMock(status_code=500)
+        mock_resp.raise_for_status.side_effect = requests.HTTPError()
+        with patch("leds.wled.requests.post", return_value=mock_resp):
+            result = client.send(_make_segments())
+        assert result is None
+
+    def test_recovery_after_failure_returns_float_rtt(self):
         client = WledClient(host="192.168.1.5", port=80, timeout=1)
         with patch("leds.wled.requests.post", side_effect=requests.Timeout()):
             client.send(_make_segments())
         with patch("leds.wled.requests.post") as mock_post:
             mock_post.return_value = MagicMock(status_code=200)
             result = client.send(_make_segments())
-        assert result is True
+        assert isinstance(result, float)
+        assert result >= 0.0
 
     def test_recovery_logs_message(self, caplog):
         """After a failure, a successful send should log a recovery message."""
@@ -135,3 +196,22 @@ class TestWledClientFailures:
                 mock_post.return_value = MagicMock(status_code=200)
                 client.send(_make_segments())
         assert any(r.levelno == logging.INFO for r in caplog.records)
+
+
+class TestRttMeasurement:
+    def test_rtt_calculation_with_mocked_time(self):
+        client = WledClient(host="192.168.1.5", port=80, timeout=1)
+        # Simulate 10 ms round trip
+        call_times = [5000.0, 5000.010]
+        with patch("leds.wled.time.monotonic", side_effect=call_times):
+            with patch("leds.wled.requests.post") as mock_post:
+                mock_post.return_value = MagicMock(status_code=200)
+                result = client.send(_make_segments())
+        assert result == pytest.approx(10.0)
+
+    def test_rtt_is_non_negative(self):
+        client = WledClient(host="192.168.1.5", port=80, timeout=1)
+        with patch("leds.wled.requests.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=200)
+            result = client.send(_make_segments())
+        assert result >= 0.0

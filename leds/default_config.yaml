@@ -3,14 +3,8 @@ osc_listen_port: 9000
 wled_host: "192.168.4.1"
 wled_port: 80
 wled_timeout: 0.1
-update_rate_hz: 20
-idle_color: [0, 0, 255]
-warm_color: [255, 180, 0]
-gsr_shared_color: [200, 0, 200]
-min_brightness: 20
-max_brightness: 255
-idle_effect: 0
-gsr_effect: 63
-gsr_threshold: 0.1
-speed_min: 60
-speed_max: 200
+update_rate_hz: 30
+pads: [0, 1, 2, 3]
+default_program: "breathe"
+default_palette: "default"
+latency_offset_ms: "auto"

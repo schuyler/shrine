@@ -5,8 +5,22 @@ import pytest
 
 from leds.config import load_config
 
-# Keys that must always be present in a loaded config
-EXPECTED_KEYS = [
+# Keys that must be present in the new config schema
+NEW_KEYS = [
+    "osc_listen_host",
+    "osc_listen_port",
+    "wled_host",
+    "wled_port",
+    "wled_timeout",
+    "update_rate_hz",
+    "pads",
+    "default_program",
+    "default_palette",
+    "latency_offset_ms",
+]
+
+# Keys from the old schema that must NOT appear in the new config
+OLD_KEYS = [
     "idle_color",
     "warm_color",
     "gsr_shared_color",
@@ -20,55 +34,63 @@ EXPECTED_KEYS = [
 ]
 
 
-class TestLoadDefaultConfig:
+class TestDefaultConfig:
     def test_returns_dict(self):
         config = load_config()
         assert isinstance(config, dict)
 
-    @pytest.mark.parametrize("key", EXPECTED_KEYS)
+    @pytest.mark.parametrize("key", NEW_KEYS)
     def test_default_config_has_key(self, key):
         config = load_config()
         assert key in config, f"Expected key {key!r} not found in default config"
 
-    def test_idle_color_is_list_of_3(self):
+    def test_pads_is_list(self):
         config = load_config()
-        assert isinstance(config["idle_color"], list)
-        assert len(config["idle_color"]) == 3
+        assert isinstance(config["pads"], list)
 
-    def test_warm_color_is_list_of_3(self):
+    def test_pads_contains_ints(self):
         config = load_config()
-        assert isinstance(config["warm_color"], list)
-        assert len(config["warm_color"]) == 3
+        assert all(isinstance(p, int) for p in config["pads"])
 
-    def test_gsr_shared_color_is_list_of_3(self):
+    def test_default_program_is_string(self):
         config = load_config()
-        assert isinstance(config["gsr_shared_color"], list)
-        assert len(config["gsr_shared_color"]) == 3
+        assert isinstance(config["default_program"], str)
 
-    def test_min_brightness_is_int(self):
+    def test_default_palette_is_string(self):
         config = load_config()
-        assert isinstance(config["min_brightness"], int)
+        assert isinstance(config["default_palette"], str)
 
-    def test_max_brightness_is_int(self):
+    def test_latency_offset_ms_is_auto_or_numeric(self):
         config = load_config()
-        assert isinstance(config["max_brightness"], int)
+        value = config["latency_offset_ms"]
+        assert value == "auto" or isinstance(value, (int, float)), (
+            f"latency_offset_ms must be 'auto' or numeric, got {value!r}"
+        )
 
-    def test_min_brightness_less_than_max(self):
+    def test_update_rate_hz_is_numeric(self):
         config = load_config()
-        assert config["min_brightness"] < config["max_brightness"]
+        assert isinstance(config["update_rate_hz"], (int, float))
 
-    def test_brightness_values_in_range(self):
+    def test_default_pads_value(self):
         config = load_config()
-        assert 0 <= config["min_brightness"] <= 255
-        assert 0 <= config["max_brightness"] <= 255
+        assert config["pads"] == [0, 1, 2, 3]
 
-    def test_gsr_threshold_is_float_or_int(self):
+    def test_default_program_value(self):
         config = load_config()
-        assert isinstance(config["gsr_threshold"], (float, int))
+        assert config["default_program"] == "breathe"
 
-    def test_speed_min_less_than_speed_max(self):
+    def test_default_palette_value(self):
         config = load_config()
-        assert config["speed_min"] < config["speed_max"]
+        assert config["default_palette"] == "default"
+
+    def test_default_update_rate_hz_value(self):
+        config = load_config()
+        assert config["update_rate_hz"] == 30
+
+    @pytest.mark.parametrize("key", OLD_KEYS)
+    def test_old_key_absent(self, key):
+        config = load_config()
+        assert key not in config, f"Old key {key!r} must not be present in new config"
 
 
 class TestCustomConfigOverrides:
@@ -82,38 +104,35 @@ class TestCustomConfigOverrides:
         return f.name
 
     def test_custom_value_overrides_default(self):
-        path = self._write_yaml("min_brightness: 5\n")
+        path = self._write_yaml("update_rate_hz: 60\n")
         try:
             config = load_config(path)
-            assert config["min_brightness"] == 5
+            assert config["update_rate_hz"] == 60
         finally:
             os.unlink(path)
 
     def test_non_overridden_keys_retain_defaults(self):
-        path = self._write_yaml("min_brightness: 5\n")
+        path = self._write_yaml("update_rate_hz: 60\n")
         try:
             config = load_config(path)
-            # max_brightness was not overridden; should come from defaults
             default_config = load_config()
-            assert config["max_brightness"] == default_config["max_brightness"]
+            assert config["wled_host"] == default_config["wled_host"]
         finally:
             os.unlink(path)
 
-    def test_custom_color_override(self):
-        path = self._write_yaml("idle_color: [255, 0, 0]\n")
+    def test_custom_pads_override(self):
+        path = self._write_yaml("pads: [0, 1]\n")
         try:
             config = load_config(path)
-            assert config["idle_color"] == [255, 0, 0]
+            assert config["pads"] == [0, 1]
         finally:
             os.unlink(path)
 
-    def test_multiple_overrides(self):
-        content = "min_brightness: 10\nmax_brightness: 200\n"
-        path = self._write_yaml(content)
+    def test_custom_default_program_override(self):
+        path = self._write_yaml("default_program: pulse\n")
         try:
             config = load_config(path)
-            assert config["min_brightness"] == 10
-            assert config["max_brightness"] == 200
+            assert config["default_program"] == "pulse"
         finally:
             os.unlink(path)
 
@@ -122,7 +141,7 @@ class TestCustomConfigOverrides:
         try:
             config = load_config(path)
             default_config = load_config()
-            for key in EXPECTED_KEYS:
+            for key in NEW_KEYS:
                 assert config[key] == default_config[key]
         finally:
             os.unlink(path)
