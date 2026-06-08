@@ -35,6 +35,7 @@ import numpy as np
 from scipy.interpolate import make_interp_spline
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from matplotlib.widgets import Button
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import BlockingOSCUDPServer
 
@@ -190,6 +191,29 @@ def main():
     # Running y-range accumulators (expand-only, like plot_fdm.py)
     pair_y = [[float("inf"), float("-inf")] for _ in range(6)]
     node_y = [[float("inf"), float("-inf")] for _ in range(4)]
+
+    def reset(_event):
+        global _t0
+        _t0 = time.time()
+        with _lock:
+            for i in range(4):
+                _node_ts[i].clear()
+                _node_sd[i].clear()
+                _node_ema_sd[i] = None
+                _node_last_t[i] = None
+            for i in range(6):
+                _pair_ts[i].clear()
+                _pair_mag[i].clear()
+                _pair_ema_mag[i] = None
+                _pair_last_t[i] = None
+        for i in range(6):
+            pair_y[i] = [float("inf"), float("-inf")]
+        for i in range(4):
+            node_y[i] = [float("inf"), float("-inf")]
+
+    ax_reset = fig.add_axes([0.91, 0.01, 0.08, 0.03])
+    btn_reset = Button(ax_reset, "Reset", hovercolor="0.85")
+    btn_reset.on_clicked(reset)
 
     def update(_frame):
         now = time.time() - _t0
