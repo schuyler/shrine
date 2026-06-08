@@ -130,43 +130,43 @@ esp_err_t nvs_config_load(node_config_t *config)
         goto done;
     }
 
-    /* scale_stdev (optional — defaults to CAL_SCALE_DEFAULT = 1000 = 1.0×) */
-    config->scale_stdev = CAL_SCALE_DEFAULT;
-    err = nvs_get_u16(handle, "scale_stdev", &config->scale_stdev);
+    /* ceil_stdev (optional — defaults to CAL_CEIL_DEFAULT = 65535 = unconfigured) */
+    config->ceil_stdev = CAL_CEIL_DEFAULT;
+    err = nvs_get_u16(handle, "ceil_stdev", &config->ceil_stdev);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         err = ESP_OK;
     } else if (err != ESP_OK) {
-        ESP_LOGE(TAG, "read scale_stdev: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "read ceil_stdev: %s", esp_err_to_name(err));
         goto done;
     }
 
-    /* scale_gsr0 (optional) */
-    config->scale_gsr0 = CAL_SCALE_DEFAULT;
-    err = nvs_get_u16(handle, "scale_gsr0", &config->scale_gsr0);
+    /* ceil_gsr0 (optional) */
+    config->ceil_gsr0 = CAL_CEIL_DEFAULT;
+    err = nvs_get_u16(handle, "ceil_gsr0", &config->ceil_gsr0);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         err = ESP_OK;
     } else if (err != ESP_OK) {
-        ESP_LOGE(TAG, "read scale_gsr0: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "read ceil_gsr0: %s", esp_err_to_name(err));
         goto done;
     }
 
-    /* scale_gsr1 (optional) */
-    config->scale_gsr1 = CAL_SCALE_DEFAULT;
-    err = nvs_get_u16(handle, "scale_gsr1", &config->scale_gsr1);
+    /* ceil_gsr1 (optional) */
+    config->ceil_gsr1 = CAL_CEIL_DEFAULT;
+    err = nvs_get_u16(handle, "ceil_gsr1", &config->ceil_gsr1);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         err = ESP_OK;
     } else if (err != ESP_OK) {
-        ESP_LOGE(TAG, "read scale_gsr1: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "read ceil_gsr1: %s", esp_err_to_name(err));
         goto done;
     }
 
-    /* scale_gsr2 (optional) */
-    config->scale_gsr2 = CAL_SCALE_DEFAULT;
-    err = nvs_get_u16(handle, "scale_gsr2", &config->scale_gsr2);
+    /* ceil_gsr2 (optional) */
+    config->ceil_gsr2 = CAL_CEIL_DEFAULT;
+    err = nvs_get_u16(handle, "ceil_gsr2", &config->ceil_gsr2);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         err = ESP_OK;
     } else if (err != ESP_OK) {
-        ESP_LOGE(TAG, "read scale_gsr2: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "read ceil_gsr2: %s", esp_err_to_name(err));
         goto done;
     }
 
@@ -176,9 +176,9 @@ esp_err_t nvs_config_load(node_config_t *config)
     ESP_LOGI(TAG, "cal floors: stdev=%u gsr=[%u, %u, %u]",
              config->floor_stdev, config->floor_gsr0,
              config->floor_gsr1, config->floor_gsr2);
-    ESP_LOGI(TAG, "cal scales: stdev=%u gsr=[%u, %u, %u]",
-             config->scale_stdev, config->scale_gsr0,
-             config->scale_gsr1, config->scale_gsr2);
+    ESP_LOGI(TAG, "cal ceils: stdev=%u gsr=[%u, %u, %u]",
+             config->ceil_stdev, config->ceil_gsr0,
+             config->ceil_gsr1, config->ceil_gsr2);
 
 done:
     nvs_close(handle);

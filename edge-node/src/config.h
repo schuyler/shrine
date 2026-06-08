@@ -30,7 +30,7 @@
 
 /* Calibration NVS defaults */
 #define CAL_FLOOR_DEFAULT       0   /* no floor subtraction */
-#define CAL_SCALE_DEFAULT    1000   /* 1.0× (fixed-point: value / 1000) */
+#define CAL_CEIL_DEFAULT    65535   /* sentinel: channel unconfigured */
 
 /* ---------------------------------------------------------------------------
  * Task configuration
@@ -61,10 +61,10 @@ typedef struct {
     uint16_t floor_gsr0;    /* calibration floor (NVS optional, default 0) */
     uint16_t floor_gsr1;    /* calibration floor (NVS optional, default 0) */
     uint16_t floor_gsr2;    /* calibration floor (NVS optional, default 0) */
-    uint16_t scale_stdev;   /* calibration scale × 1000 (NVS optional, default 1000) */
-    uint16_t scale_gsr0;    /* calibration scale × 1000 (NVS optional, default 1000) */
-    uint16_t scale_gsr1;    /* calibration scale × 1000 (NVS optional, default 1000) */
-    uint16_t scale_gsr2;    /* calibration scale × 1000 (NVS optional, default 1000) */
+    uint16_t ceil_stdev;    /* calibration ceiling (NVS optional, default 65535 = unconfigured) */
+    uint16_t ceil_gsr0;     /* calibration ceiling (NVS optional, default 65535 = unconfigured) */
+    uint16_t ceil_gsr1;     /* calibration ceiling (NVS optional, default 65535 = unconfigured) */
+    uint16_t ceil_gsr2;     /* calibration ceiling (NVS optional, default 65535 = unconfigured) */
 } node_config_t;
 
 typedef struct {

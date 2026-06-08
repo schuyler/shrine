@@ -69,6 +69,32 @@ node parameters. CSV templates are in `nvs/`.
 | `base_k` | u16 | no | DFT bin for node 0 (default 180) |
 | `step_k` | u16 | no | Bin spacing between nodes (default 20) |
 | `window_n` | u16 | no | Samples per demod window (default 1800) |
+| `floor_stdev` | u16 | no | Calibration floor for stdev channel (default 0) |
+| `floor_gsr0` | u16 | no | Calibration floor for GSR channel 0 (default 0) |
+| `floor_gsr1` | u16 | no | Calibration floor for GSR channel 1 (default 0) |
+| `floor_gsr2` | u16 | no | Calibration floor for GSR channel 2 (default 0) |
+| `ceil_stdev` | u16 | no | Calibration ceiling for stdev channel (default 65535 = unconfigured) |
+| `ceil_gsr0` | u16 | no | Calibration ceiling for GSR channel 0 (default 65535 = unconfigured) |
+| `ceil_gsr1` | u16 | no | Calibration ceiling for GSR channel 1 (default 65535 = unconfigured) |
+| `ceil_gsr2` | u16 | no | Calibration ceiling for GSR channel 2 (default 65535 = unconfigured) |
+
+#### Calibration
+
+Normalized output per channel is computed as:
+
+```
+out = clamp((raw - floor) / (ceiling - floor), 0, 1)
+```
+
+A channel is unconfigured if any of the following are true: its ceiling key is
+absent from NVS, its ceiling value equals 65535 (the sentinel default), or its
+ceiling value is less than or equal to its floor. Unconfigured channels output
+0.0.
+
+To calibrate a channel: observe the raw signal range under expected operating
+conditions, then set `floor_*` to the quiescent (no-touch) value and `ceil_*`
+to the maximum expected value. Floor and ceiling are u16 integers matching the
+units of the raw signal (stdev or I/Q magnitude × window_n).
 
 ### Generate and flash
 
@@ -138,9 +164,17 @@ typedef struct {
     char     wifi_pass[65];
     char     osc_host[16];
     uint16_t osc_port;
-    uint16_t base_k;      /* DFT bin for node 0; default 180 */
-    uint16_t step_k;      /* bin spacing between nodes; default 20 */
-    uint16_t window_n;    /* samples per demod window; default 1800 */
+    uint16_t base_k;        /* DFT bin for node 0; default 180 */
+    uint16_t step_k;        /* bin spacing between nodes; default 20 */
+    uint16_t window_n;      /* samples per demod window; default 1800 */
+    uint16_t floor_stdev;   /* calibration floor, stdev channel; default 0 */
+    uint16_t floor_gsr0;    /* calibration floor, GSR channel 0; default 0 */
+    uint16_t floor_gsr1;    /* calibration floor, GSR channel 1; default 0 */
+    uint16_t floor_gsr2;    /* calibration floor, GSR channel 2; default 0 */
+    uint16_t ceil_stdev;    /* calibration ceiling, stdev channel; default 65535 = unconfigured */
+    uint16_t ceil_gsr0;     /* calibration ceiling, GSR channel 0; default 65535 = unconfigured */
+    uint16_t ceil_gsr1;     /* calibration ceiling, GSR channel 1; default 65535 = unconfigured */
+    uint16_t ceil_gsr2;     /* calibration ceiling, GSR channel 2; default 65535 = unconfigured */
 } node_config_t;
 
 /* scan_result_t — produced by sensing_task, consumed by network_task */
@@ -240,6 +274,11 @@ Each node sends one UDP/OSC packet per completed window.
 | Float 2 | `gsr_mag[0]` — I/Q magnitude at next node's carrier |
 | Float 3 | `gsr_mag[1]` — I/Q magnitude at node+2's carrier |
 | Float 4 | `gsr_mag[2]` — I/Q magnitude at node+3's carrier |
+
+When calibration is enabled (the compiled default), Floats 0 and 2–4 are
+normalized to 0.0–1.0 by the calibration formula. Float 1 (`self_carrier_mag`)
+is always the raw I/Q magnitude. When a channel is unconfigured, its normalized
+value is 0.0.
 
 `gsr_mag` indices use the `(node_id + offset) % NUM_NODES` convention
 (`offset` = 1, 2, 3). The receiver can reconstruct which physical node pair
