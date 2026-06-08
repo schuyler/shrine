@@ -28,6 +28,11 @@
 #define NUM_NODES               4
 #define NCO_RENORM_INTERVAL    64   /* informational — fdm_math.c hardcodes this */
 
+/* FFT spectrum diagnostic */
+#define FFT_N                 2048
+#define FFT_BINS              (FFT_N / 2)   /* 1024 */
+#define FFT_INTERVAL_WINDOWS  500           /* ~5s at ~100 windows/sec */
+
 /* Calibration NVS defaults */
 #define CAL_FLOOR_DEFAULT       0   /* no floor subtraction */
 #define CAL_CEIL_DEFAULT    65535   /* sentinel: channel unconfigured */

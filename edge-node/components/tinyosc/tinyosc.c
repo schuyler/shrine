@@ -1,8 +1,10 @@
 /*
  * tinyosc.c — minimal OSC message writer
  *
- * Implements OSC 1.0 wire format for messages with float arguments.
- * Only type tag 'f' (IEEE 754 32-bit float, big-endian) is supported.
+ * Implements OSC 1.0 wire format for messages with float and blob arguments.
+ * Supported type tags:
+ *   'f' — IEEE 754 32-bit float, big-endian
+ *   'b' — blob (4-byte big-endian size + data + zero-pad to 4-byte boundary)
  */
 
 #include "tinyosc.h"
@@ -88,6 +90,24 @@ int tosc_writeMessage(char *buffer, int bufLen,
                 return -1;
             }
             pos += n;
+            break;
+        }
+        case 'b': {
+            void *blob_data = va_arg(args, void *);
+            int32_t blob_size = (int32_t)va_arg(args, int);
+            /* Write 4-byte big-endian size */
+            if (bufLen - pos < 4) { va_end(args); return -1; }
+            buffer[pos]   = (char)((blob_size >> 24) & 0xFF);
+            buffer[pos+1] = (char)((blob_size >> 16) & 0xFF);
+            buffer[pos+2] = (char)((blob_size >>  8) & 0xFF);
+            buffer[pos+3] = (char)( blob_size        & 0xFF);
+            pos += 4;
+            /* Write data + padding */
+            int padded_size = pad4(blob_size);
+            if (bufLen - pos < padded_size) { va_end(args); return -1; }
+            memcpy(buffer + pos, blob_data, blob_size);
+            memset(buffer + pos + blob_size, 0, padded_size - blob_size);
+            pos += padded_size;
             break;
         }
         default:

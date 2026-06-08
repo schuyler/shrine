@@ -348,6 +348,162 @@ static void test_overflow_zero_length_buffer(void)
 }
 
 /* -------------------------------------------------------------------------
+ * Blob ('b') encoding tests
+ * ------------------------------------------------------------------------- */
+
+/*
+ * "/a" "b" with 4 bytes [0xDE, 0xAD, 0xBE, 0xEF].
+ *
+ * Layout after address [0,3] and type tag [4,7]:
+ *   [8 ..11]  size field: 0x00 0x00 0x00 0x04
+ *   [12..15]  data: 0xDE 0xAD 0xBE 0xEF  (no padding needed)
+ */
+static void test_blob_basic(void)
+{
+    char buf[64];
+    memset(buf, 0xAA, sizeof(buf));
+    uint8_t blob_data[] = {0xDE, 0xAD, 0xBE, 0xEF};
+    int ret = tosc_writeMessage(buf, sizeof(buf), "/a", "b",
+                                (void *)blob_data, (int)4);
+    TEST_ASSERT(ret > 0);
+    int boff = 8; /* address 4 + type tag 4 */
+    /* Size field (big-endian 4). */
+    TEST_ASSERT((unsigned char)buf[boff + 0] == 0x00);
+    TEST_ASSERT((unsigned char)buf[boff + 1] == 0x00);
+    TEST_ASSERT((unsigned char)buf[boff + 2] == 0x00);
+    TEST_ASSERT((unsigned char)buf[boff + 3] == 0x04);
+    /* Data bytes. */
+    TEST_ASSERT((unsigned char)buf[boff + 4] == 0xDE);
+    TEST_ASSERT((unsigned char)buf[boff + 5] == 0xAD);
+    TEST_ASSERT((unsigned char)buf[boff + 6] == 0xBE);
+    TEST_ASSERT((unsigned char)buf[boff + 7] == 0xEF);
+}
+
+/*
+ * "/a" "b" with 3 bytes [0x01, 0x02, 0x03].
+ * 3 data bytes need 1 padding byte to reach the next 4-byte boundary.
+ *
+ *   [8 ..11]  size: 0x00 0x00 0x00 0x03
+ *   [12..14]  data: 0x01 0x02 0x03
+ *   [15]      padding zero
+ */
+static void test_blob_with_padding(void)
+{
+    char buf[64];
+    memset(buf, 0xAA, sizeof(buf));
+    uint8_t blob_data[] = {0x01, 0x02, 0x03};
+    int ret = tosc_writeMessage(buf, sizeof(buf), "/a", "b",
+                                (void *)blob_data, (int)3);
+    TEST_ASSERT(ret > 0);
+    int boff = 8;
+    /* Size field. */
+    TEST_ASSERT((unsigned char)buf[boff + 0] == 0x00);
+    TEST_ASSERT((unsigned char)buf[boff + 1] == 0x00);
+    TEST_ASSERT((unsigned char)buf[boff + 2] == 0x00);
+    TEST_ASSERT((unsigned char)buf[boff + 3] == 0x03);
+    /* Data bytes. */
+    TEST_ASSERT((unsigned char)buf[boff + 4] == 0x01);
+    TEST_ASSERT((unsigned char)buf[boff + 5] == 0x02);
+    TEST_ASSERT((unsigned char)buf[boff + 6] == 0x03);
+    /* Padding zero. */
+    TEST_ASSERT((unsigned char)buf[boff + 7] == 0x00);
+}
+
+/*
+ * "/a" "b" with 0 bytes.
+ * Expected total: address 4 + type tag 4 + size 4 = 12 bytes.
+ * No data or padding bytes follow the size field.
+ */
+static void test_blob_empty(void)
+{
+    char buf[64];
+    memset(buf, 0xAA, sizeof(buf));
+    int ret = tosc_writeMessage(buf, sizeof(buf), "/a", "b",
+                                (void *)NULL, (int)0);
+    TEST_ASSERT_INT_EQ(12, ret);
+    int boff = 8;
+    /* Size field must be zero. */
+    TEST_ASSERT((unsigned char)buf[boff + 0] == 0x00);
+    TEST_ASSERT((unsigned char)buf[boff + 1] == 0x00);
+    TEST_ASSERT((unsigned char)buf[boff + 2] == 0x00);
+    TEST_ASSERT((unsigned char)buf[boff + 3] == 0x00);
+}
+
+/*
+ * "/a" "fb" — one float (1.0f) then a 2-byte blob [0xAA, 0xBB].
+ *
+ * Layout:
+ *   [0 .. 3]  address "/a"
+ *   [4 .. 7]  type tag ",fb"  — pad4(4) = 4 (NUL at byte 3, no extra pad)
+ *   [8 ..11]  float 1.0f
+ *   [12..15]  blob size: 0x00 0x00 0x00 0x02
+ *   [16..17]  blob data: 0xAA 0xBB
+ *   [18..19]  two padding zeros (to reach next 4-byte boundary)
+ */
+static void test_blob_with_float(void)
+{
+    char buf[64];
+    memset(buf, 0xCC, sizeof(buf));
+    uint8_t blob_data[] = {0xAA, 0xBB};
+    int ret = tosc_writeMessage(buf, sizeof(buf), "/a", "fb",
+                                1.0f, (void *)blob_data, (int)2);
+    TEST_ASSERT(ret > 0);
+    /* Float at offset 8: 1.0f == 0x3F800000. */
+    TEST_ASSERT((unsigned char)buf[8]  == 0x3F);
+    TEST_ASSERT((unsigned char)buf[9]  == 0x80);
+    TEST_ASSERT((unsigned char)buf[10] == 0x00);
+    TEST_ASSERT((unsigned char)buf[11] == 0x00);
+    /* Blob size at offset 12. */
+    TEST_ASSERT((unsigned char)buf[12] == 0x00);
+    TEST_ASSERT((unsigned char)buf[13] == 0x00);
+    TEST_ASSERT((unsigned char)buf[14] == 0x00);
+    TEST_ASSERT((unsigned char)buf[15] == 0x02);
+    /* Blob data at offset 16. */
+    TEST_ASSERT((unsigned char)buf[16] == 0xAA);
+    TEST_ASSERT((unsigned char)buf[17] == 0xBB);
+    /* Two padding zeros. */
+    TEST_ASSERT((unsigned char)buf[18] == 0x00);
+    TEST_ASSERT((unsigned char)buf[19] == 0x00);
+}
+
+/*
+ * Exact return value for "/a" "b" with 5 bytes of data:
+ *   address:   pad4(3) = 4
+ *   type tag:  pad4(3) = 4
+ *   blob:      4 (size) + 5 (data) + 3 (padding to 8) = 12
+ *   total: 20
+ */
+static void test_blob_return_value(void)
+{
+    char buf[64];
+    uint8_t blob_data[5] = {0x11, 0x22, 0x33, 0x44, 0x55};
+    int ret = tosc_writeMessage(buf, sizeof(buf), "/a", "b",
+                                (void *)blob_data, (int)5);
+    TEST_ASSERT_INT_EQ(20, ret);
+}
+
+/*
+ * Buffer too small to fit the blob must return -1.
+ * Sentinel byte immediately after the declared bufLen must be untouched.
+ */
+static void test_blob_overflow(void)
+{
+    /*
+     * "/a" "b" with 5 bytes needs 20 bytes.  Provide only 19.
+     * Allocate 21 so buf[19] and buf[20] are sentinels.
+     */
+    char buf[21];
+    memset(buf, 0xBB, sizeof(buf));
+    uint8_t blob_data[5] = {0x11, 0x22, 0x33, 0x44, 0x55};
+    int ret = tosc_writeMessage(buf, 19 /* one byte short */, "/a", "b",
+                                (void *)blob_data, (int)5);
+    TEST_ASSERT_INT_EQ(-1, ret);
+    /* Sentinels must be untouched. */
+    TEST_ASSERT((unsigned char)buf[19] == 0xBB);
+    TEST_ASSERT((unsigned char)buf[20] == 0xBB);
+}
+
+/* -------------------------------------------------------------------------
  * Return value tests
  * ------------------------------------------------------------------------- */
 
@@ -415,6 +571,13 @@ int main(void)
     RUN_TEST(test_return_value_single_float);
     RUN_TEST(test_return_value_two_floats);
     RUN_TEST(test_return_value_exact_fit);
+
+    RUN_TEST(test_blob_basic);
+    RUN_TEST(test_blob_with_padding);
+    RUN_TEST(test_blob_empty);
+    RUN_TEST(test_blob_with_float);
+    RUN_TEST(test_blob_return_value);
+    RUN_TEST(test_blob_overflow);
 
     return TEST_REPORT();
 }

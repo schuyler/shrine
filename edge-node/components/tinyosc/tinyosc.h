@@ -4,11 +4,12 @@
 /*
  * tinyosc — minimal OSC message writer
  *
- * Supports writing OSC messages with float ('f') arguments to a caller-
- * supplied buffer.  The wire format follows the OSC 1.0 spec:
+ * Supports writing OSC messages with float ('f') and blob ('b') arguments
+ * to a caller-supplied buffer.  The wire format follows the OSC 1.0 spec:
  *   - address pattern:  null-terminated string, padded to 4-byte boundary
  *   - type tag string:  "," + type chars, null-terminated, padded to 4-byte boundary
- *   - arguments:        big-endian IEEE 754 floats (4 bytes each)
+ *   - arguments:        big-endian IEEE 754 floats (4 bytes each);
+ *                       blobs: 4-byte big-endian size + raw data + zero-padding
  */
 
 #include <stdarg.h>
@@ -24,8 +25,10 @@ extern "C" {
  * @param bufLen   Capacity of destination buffer in bytes.
  * @param address  OSC address pattern, e.g. "/shrine/cap".
  * @param format   Type tag string (without the leading comma), e.g. "fff".
- *                 Only 'f' (float) is currently supported.
- * @param ...      One float argument per character in format.
+ *                 Supported: 'f' (float), 'b' (blob).
+ *                 'b' takes two arguments: (void *data, int size).
+ * @param ...      One argument per character in format (float for 'f';
+ *                 void* data + int size for 'b').
  *
  * @return Number of bytes written, or -1 if the buffer is too small.
  */

@@ -161,6 +161,35 @@ static void send_osc(int sock, const struct sockaddr_in *dest,
 }
 
 /* -------------------------------------------------------------------------
+ * FFT spectrum OSC send
+ * -------------------------------------------------------------------------*/
+
+/* Separate buffer for FFT messages — the 1024-byte blob doesn't fit in
+ * OSC_BUF_SIZE (128 bytes) and we don't want to enlarge the hot-path buffer. */
+#define FFT_OSC_BUF_SIZE 1200
+
+static void send_fft_osc(int sock, const struct sockaddr_in *dest,
+                          const node_config_t *cfg)
+{
+    char addr[40];
+    snprintf(addr, sizeof(addr), "/shrine/node/%u/fft", cfg->node_id);
+
+    char buf[FFT_OSC_BUF_SIZE];
+    int len = tosc_writeMessage(buf, sizeof(buf), addr, "b",
+                                (void *)g_fft_spectrum, (int)FFT_BINS);
+    if (len < 0) {
+        ESP_LOGD(TAG, "tosc_writeMessage (FFT): buffer too small");
+        return;
+    }
+
+    int sent = sendto(sock, buf, len, 0,
+                      (const struct sockaddr *)dest, sizeof(*dest));
+    if (sent < 0) {
+        ESP_LOGD(TAG, "sendto (FFT) failed: errno=%d", errno);
+    }
+}
+
+/* -------------------------------------------------------------------------
  * network_task
  * -------------------------------------------------------------------------*/
 
@@ -205,6 +234,12 @@ void network_task(void *param)
         if (xQueueReceive(g_result_queue, &result, portMAX_DELAY) == pdTRUE) {
             calibration_apply(&cal, &result, cal_values, &carrier_mag);
             send_osc(sock, &dest, cfg, cal_values, carrier_mag);
+
+            /* Send FFT spectrum if ready (every ~5s from sensing task) */
+            if (g_fft_ready) {
+                send_fft_osc(sock, &dest, cfg);
+                g_fft_ready = false;
+            }
         }
     }
 }

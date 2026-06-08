@@ -30,6 +30,9 @@ static const char *TAG = "sensing";
  * window_accumulate could return fills > 1 and intermediate windows would be
  * overwritten in s_snapshot_buf before being processed.
  */
+_Static_assert((FFT_N & (FFT_N - 1)) == 0,
+               "FFT_N must be a power of 2 for radix-2 FFT");
+
 _Static_assert(ADC_FRAME_SIZE / 2 < WINDOW_N_DEFAULT,
                "DMA frame must contain fewer samples than one window to avoid "
                "dropping intermediate windows in the sensing loop");
@@ -46,6 +49,14 @@ static uint16_t s_snapshot_buf[WINDOW_N_DEFAULT];
 
 /* Parsed samples extracted from one DMA frame */
 static uint16_t s_frame_samples[ADC_FRAME_SIZE / 2];  /* max samples per frame */
+
+/* FFT diagnostic buffers */
+static float s_fft_buf[FFT_N * 2];          /* 16 KB, interleaved complex */
+static float s_hann[WINDOW_N_DEFAULT];       /* Hann window coefficients */
+
+/* FFT shared state (declared extern in globals.h) */
+uint8_t       g_fft_spectrum[FFT_BINS];
+volatile bool g_fft_ready = false;
 
 /* -------------------------------------------------------------------------
  * sensing_task
@@ -97,6 +108,11 @@ void sensing_task(void *param)
     scan_result_t result;
     fdm_gsr_ordering(cfg->node_id, NUM_NODES, result.gsr_node);
     result.node_id = cfg->node_id;
+
+    /* --- Startup: precompute Hann window -------------------------------- */
+    fdm_hann_window(s_hann, N);
+
+    int fft_counter = 0;
 
     /* -------------------------------------------------------------------- */
     /* Main sensing loop                                                     */
@@ -150,7 +166,35 @@ void sensing_task(void *param)
             result.gsr_mag[offset - 1] = mag[j];
         }
 
-        /* Post result to the network task (non-blocking: drop if full) */
+        /* --- FFT spectrum diagnostic (every FFT_INTERVAL_WINDOWS windows) ---
+         * Computed BEFORE xQueueSend so that the queue post's memory barrier
+         * guarantees the spectrum buffer is visible to the network task. */
+        if (++fft_counter >= FFT_INTERVAL_WINDOWS) {
+            fft_counter = 0;
+
+            /* DC-remove, apply Hann window, zero-pad to FFT_N */
+            float sum = 0.0f;
+            for (int i = 0; i < N; i++) sum += (float)s_snapshot_buf[i];
+            float fft_mean = sum / (float)N;
+
+            for (int i = 0; i < N; i++) {
+                s_fft_buf[2*i]     = ((float)s_snapshot_buf[i] - fft_mean) * s_hann[i];
+                s_fft_buf[2*i + 1] = 0.0f;  /* imaginary = 0 */
+            }
+            /* Zero-pad remaining samples to FFT_N */
+            for (int i = N; i < FFT_N; i++) {
+                s_fft_buf[2*i]     = 0.0f;
+                s_fft_buf[2*i + 1] = 0.0f;
+            }
+
+            fdm_fft_radix2(s_fft_buf, FFT_N);
+            fdm_fft_log_magnitudes(s_fft_buf, FFT_N, g_fft_spectrum);
+            g_fft_ready = true;
+        }
+
+        /* Post result to the network task (non-blocking: drop if full).
+         * The queue post provides a memory barrier that makes g_fft_spectrum
+         * writes (above) visible to the network task on the other core. */
         if (xQueueSend(g_result_queue, &result, 0) != pdTRUE) {
             ESP_LOGD(TAG, "result queue full — window dropped");
         }
