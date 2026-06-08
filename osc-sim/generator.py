@@ -38,10 +38,10 @@ GSR_PAIRS = [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)]
 # Node 3 (pad 4) sees pads 1,2,3 → pairs (1,4),(2,4),(3,4) → indices 2,4,5
 NODE_GSR_MAPPING = [[0, 1, 2], [3, 4, 0], [5, 1, 3], [2, 4, 5]]
 
-# Scale normalized 0-1 values to approximate firmware ranges
-STDEV_SCALE = 1000.0      # stdev: 0-1 → 0-1000 (firmware: ~400-1300)
-CARRIER_MAG_SCALE = 200.0  # carrier mag: 0-1 → 0-200
-GSR_MAG_SCALE = 50.0       # gsr mag: 0-1 → 0-50
+# Scale factors: firmware now sends 0-1 normalized values directly
+STDEV_SCALE = 1.0
+CARRIER_MAG_SCALE = 1.0
+GSR_MAG_SCALE = 1.0
 
 # Incommensurate frequencies for organic noise layering (Hz)
 NOISE_FREQS = [0.1, 0.23, 0.37, 0.71]
@@ -328,8 +328,8 @@ def print_summary(sent: dict, scenario: ArcScenario, t: float):
         address = f"/shrine/node/{node_id}"
         args = sent.get(address, [0.0] * 5)
         stdev = args[0]
-        gsrs = " ".join(f"{v:.1f}" for v in args[2:])
-        parts.append(f"n{node_id}:{stdev:.0f}[{gsrs}]")
+        gsrs = " ".join(f"{v:.2f}" for v in args[2:])
+        parts.append(f"n{node_id}:{stdev:.2f}[{gsrs}]")
     nodes_str = " ".join(parts)
     print(
         f"\r[{t:7.1f}s] {scenario.phase_name():12s} | {nodes_str}",

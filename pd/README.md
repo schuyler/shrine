@@ -9,9 +9,9 @@ The engine is intentionally **two engines split by layer**:
 
 - **Additive drones** — four presence-drones (one per pad), cap-driven amplitude
   and detune. Continuous, per-partial, body-coupled. (`drone.pd`)
-- **SoundFont melodic voices** — six connection-driven voices (one per GSR pair),
-  note/rhythm/volume only, played through `[sfont~]`. (`melodic-voice.pd` +
-  `sfont-host.pd`)
+- **SoundFont texture voices** — cap-triggered sfont~ voices with threshold-based
+  note on/off, intensity from cap presence, heartbeat extraction for rate
+  modulation. (`texture-test.pd` + `cap-trigger.pd` + `heartbeat.pd`)
 
 ## The OSC contract (real, as wired here)
 
@@ -21,8 +21,8 @@ the older contract some wiki pages described. It is the source of truth for this
 code.
 
 ```
-/shrine/node/{0..3}  ->  5 floats:
-    [0] self_stdev    -> pad presence ("cap"); node N -> bus cap-(N+1)
+/shrine/node/{0..3}  ->  5 floats (0-1 normalized):
+    [0] self_stdev    -> pad presence ("cap"); node N -> bus cap-N
     [1] carrier_mag   -> ignored / dropped
     [2..4] gsr_mag0..2 -> 3 GSR magnitudes, mapped to global pairs by node
 ```
@@ -38,16 +38,15 @@ GSR slot → global pair mapping (`NODE_GSR_MAPPING`, see `leds/sensor_state.py`
 
 Each pair is sensed by two nodes (redundant); last writer wins, as in `leds/`.
 
-**Value ranges:** the simulator sends cap≈0–1000 and gsr≈0–50 (mimicking firmware
-ranges); `osc-receive` normalizes to 0–1 in `normcap` (÷1000) / `normgsr` (÷50).
-Real firmware sends *calibrated* values — revisit these divisors against a live
-node before deployment.
+**Value ranges:** firmware sends calibrated 0–1 normalized values. The simulator
+(`osc-sim/generator.py`) also sends 0–1 directly. `osc-receive.pd` clips to 0–1
+but does not rescale.
 
 ### Named buses
 
 `osc-receive` publishes these via `[send]`; everything downstream `[receive]`s them:
 
-- `cap-1` … `cap-4` (0–1) — per-pad presence
+- `cap-0` … `cap-3` (0–1) — per-pad presence (0-indexed, matches node ID)
 - `gsr-mag-0` … `gsr-mag-5` (0–1) — per-pair contact magnitude
 
 There is **no per-pair GSR stdev** in the real data (the wiki's `gsr-std-0..5`
@@ -59,27 +58,23 @@ fluctuation of an existing stream (cap or gsr-mag).
 
 | File | Status | Purpose |
 |------|--------|---------|
-| `osc-receive.pd` | **verified** | OSC in → normalized `cap-*` / `gsr-mag-*` buses |
-| `normcap.pd` / `normgsr.pd` | verified | ÷1000 / ÷50 then clip 0–1 |
-| `nodevals.pd` | verified | unpack one node list → normalized cap + 3 gsr |
+| `osc-receive.pd` | **verified** | ELSE osc.receive/osc.route → `cap-*` / `gsr-mag-*` buses |
+| `cap-trigger.pd` | **verified** | threshold note on/off from cap presence (`$1`=threshold) |
+| `heartbeat.pd` | **stub** | outputs constant 1 (bp~ at 1.2 Hz diverges at 48 kHz; needs control-rate approach) |
+| `texture-test.pd` | **wired** | sfont~ texture voices: brent (cap-0) + jeanne (cap-1) |
 | `drone.pd` | **verified** | additive presence drone (inlet0 cap, inlet1 base Hz) |
 | `master.pd` | verified (load) | per-channel soft-limit → `dac~ 1-4` |
 | `clock.pd` | verified (load) | global pulse: `beat`, `bar`, `beat-ms` (default 60 BPM) |
 | `mode-table.pd` | **verified** | fills `mode-notes` array (major pentatonic, MIDI 36–93) |
 | `restless.pd` | **verified** | fluctuation proxy 0–1 (replaces absent gsr-stdev) |
 | `melodic-voice.pd` | **verified** (note-gen) | per-pair walk → MIDI to `[s voice-midi]` |
-| `heartbeat.pd` | verified | STUB: constant 60 BPM + 0 detune (per build plan) |
 | `monitor.pd` | verified (load) | DEV-ONLY bus printer (do not load in production) |
 | `main.pd` | verified (load) | top level: OSC + 4 drones + master |
 | `sfont-host.pd` | **DRAFT** | `[sfont~]` host — needs ELSE + on-target verification |
 
 "verified" = exercised headless under Pd 0.54 with the real OSC format / signal
 measurement (see Testing). "verified (load)" = loads clean, components verified
-individually. "DRAFT" = authored but not run (depends on ELSE `[sfont~]`).
-
-`main.pd` currently wires the **additive drone slice** (OSC → cap → 4 drones →
-master), which is fully verified. The SoundFont melodic layer is the next wiring
-step (see Remaining work).
+individually. "wired" = connections reviewed but not yet tested on target.
 
 ## Running
 
@@ -114,30 +109,42 @@ uv run python test/send_nodes.py                        # sends /shrine/node/*
 
 ## Gotchas discovered (worth knowing before editing)
 
-- **`[oscparse]` splits the address** into separate symbols (`shrine node 0 …`),
-  and the numeric node id arrives as a **symbol**. Vanilla `[route]`/`[select]`
-  won't match it against numeric args. `osc-receive` converts it via
-  `[makefilename x%s] → [select x0 x1 x2 x3]`, then prepends a float and routes.
+- **ELSE osc.route vs vanilla oscparse:** `osc-receive.pd` uses ELSE
+  `osc.receive` + cascaded `osc.route` (vanilla `oscparse` didn't work).
+  ELSE `osc.route` outputs "anything" messages that `unpack` rejects — a
+  `list prepend` before `unpack` normalizes the message type. FFT messages
+  (`/shrine/node/N/fft`) must be caught by a first-stage `osc.route` or they
+  cause type-mismatch errors in `unpack`.
 - **Abstraction `$`-args** work in `[send]`/`[receive]` *names* (`r cap-$1`) but
   **not as numeric values** (`[f $1]` yields 0). Pass values via inlets instead —
   that's why `drone` takes its base frequency on an inlet.
 - **Commas and semicolons in `#X text` comments** must be escaped (`\,` `\;`) or
   Pd parses the tail as a separate message and throws "no method" errors.
+- **`sel` outlet 1 passes values, not bangs.** When using `sel N` for edge
+  detection (e.g. in `cap-trigger.pd`), outlet 1 passes the non-matching value
+  through. Use `t b` to strip it if you need a pure bang for triggering `f`.
+
+## Deployment
+
+`pd/` is excluded from `scripts/deploy.sh`. Copy individual Pd files to corazon
+with `scp`:
+
+```bash
+scp pd/osc-receive.pd pd/cap-trigger.pd pd/heartbeat.pd corazon:shrine/pd/
+```
+
+`texture-test.pd` is edited in the Pd GUI on corazon. Copy it only when
+replacing the entire patch.
 
 ## Remaining work
 
-Mapping to `Pd_Build_Plan`'s phases:
-
-1. **Melodic layer (build-plan Phase 1/3):** drop a GM choir/organ `.sf2` into
-   `pd/samples/`, finish `sfont-host.pd` against the real `[sfont~]` message
-   syntax, instantiate six `melodic-voice` in `main.pd` (register index + channel
-   per pair via inlets), and verify on Pd 0.56 + ELSE.
-2. **Subdivision:** drive `melodic-voice` step rate from `restless-*` via the
-   subdivision ladder (per-bar commit + hysteresis). Currently steps once per beat.
-3. **Walk polish:** reflect at window edges instead of `[clip]`; add note-off
-   discipline so `[sfont~]` doesn't pile up stuck notes.
+1. **Test texture-test.pd on target:** verify sfont~ note on/off, intensity CC11,
+   heartbeat rate modulation with live sensor data or simulator.
+2. **Heartbeat extraction:** bp~ at 1.2 Hz diverges numerically at audio sample
+   rate. Needs a control-rate or decimated approach (accumulate samples, filter
+   in a decimated domain). Currently stubbed to output 1.
+3. **Jeanne initialization:** add loadbang → bank/pgm init (brent has this,
+   jeanne currently requires manual Pgm selection).
 4. **Drone detune wobble:** high-pass `cap-N` and feed the fluctuation into the
    drone partial detune (build-plan gotcha) — structure noted in `drone.pd`.
-5. **Heartbeat:** replace `heartbeat.pd` stub once the 1–3 Hz pulse signal is
-   bench-validated.
-6. **Output:** tactile sends (`dac~ 5-8`, LPF ~80 Hz) in `master.pd`.
+5. **Output:** tactile sends (`dac~ 5-8`, LPF ~80 Hz) in `master.pd`.

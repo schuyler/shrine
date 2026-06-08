@@ -7,4 +7,5 @@ rsync -avz \
     --exclude='.DS_Store' \
     --exclude='nvs/*.csv' \
     --exclude='wled/*.bin' \
+    --exclude='pd/' \
     ./ corazon:shrine/
