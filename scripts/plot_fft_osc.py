@@ -7,7 +7,7 @@ blob of u8 log-magnitudes (0 = noise floor, 255 = full scale over 96 dB).
 
 X-axis: frequency in Hz (bin index × sample_rate / FFT_N).
 Y-axis: dB (u8 → 0..96 dB mapping).
-Vertical lines mark the 4 FDM carrier frequencies.
+Vertical lines mark auto-detected carrier peaks per node.
 
 Usage:
     python scripts/plot_fft_osc.py
@@ -18,7 +18,6 @@ Requires: pip install pythonosc matplotlib numpy
 """
 
 import argparse
-import struct
 import threading
 
 import numpy as np
@@ -31,16 +30,18 @@ from pythonosc.osc_server import BlockingOSCUDPServer
 FFT_N = 2048
 FFT_BINS = FFT_N // 2  # 1024
 DB_RANGE = 96.0
-
-# FDM carrier parameters (defaults from config.h)
-DEFAULT_SAMPLE_RATE = 180000
-DEFAULT_BASE_K = 180
-DEFAULT_STEP_K = 20
-DEFAULT_WINDOW_N = 1800
 NUM_NODES = 4
+DEFAULT_SAMPLE_RATE = 180000
+
+# Ignore bins below this frequency when searching for carrier peaks,
+# to avoid locking onto DC offset or low-frequency noise.
+PEAK_MIN_HZ = 5000
 
 CARRIER_COLORS = ["#e6194b", "#3cb44b", "#4363d8", "#f58231"]
 SPECTRUM_COLOR = "#333333"
+
+SMOOTH_KERNEL_SIZE = 15
+DECIMATE_STRIDE = 4
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +78,16 @@ def _make_fft_handler(node_id: int):
     return handler
 
 
+def _find_carrier_peak(spectrum_db, freqs, min_hz):
+    """Return the frequency of the strongest bin above min_hz."""
+    min_bin = int(min_hz / (freqs[1] - freqs[0])) if len(freqs) > 1 else 0
+    region = spectrum_db[min_bin:]
+    if len(region) == 0:
+        return None
+    peak_bin = min_bin + np.argmax(region)
+    return freqs[peak_bin]
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -98,36 +109,12 @@ def main():
         default=DEFAULT_SAMPLE_RATE,
         help=f"ADC sample rate in Hz (default: {DEFAULT_SAMPLE_RATE})",
     )
-    parser.add_argument(
-        "--base-k",
-        type=int,
-        default=DEFAULT_BASE_K,
-        help=f"DFT bin for node 0 (default: {DEFAULT_BASE_K})",
-    )
-    parser.add_argument(
-        "--step-k",
-        type=int,
-        default=DEFAULT_STEP_K,
-        help=f"Bin spacing between nodes (default: {DEFAULT_STEP_K})",
-    )
-    parser.add_argument(
-        "--window-n",
-        type=int,
-        default=DEFAULT_WINDOW_N,
-        help=f"Samples per demod window (default: {DEFAULT_WINDOW_N})",
-    )
     args = parser.parse_args()
 
     # Frequency axis: bin index × (sample_rate / FFT_N)
     freq_resolution = args.sample_rate / FFT_N
     freqs = np.arange(FFT_BINS) * freq_resolution
-
-    # Carrier frequencies
-    carrier_freqs = []
-    for node_id in range(NUM_NODES):
-        k = args.base_k + node_id * args.step_k
-        f = k * args.sample_rate / args.window_n
-        carrier_freqs.append(f)
+    freqs_decimated = freqs[::DECIMATE_STRIDE]
 
     # --- OSC server ---
     dispatcher = Dispatcher()
@@ -139,48 +126,62 @@ def main():
     osc_thread.start()
     print(f"Listening for FFT spectra on {args.host}:{args.port}")
     print(f"Frequency resolution: {freq_resolution:.1f} Hz/bin")
-    for nid, cf in enumerate(carrier_freqs):
-        print(f"  Node {nid} carrier: {cf:.0f} Hz (k={args.base_k + nid * args.step_k})")
+    print("Carrier markers: auto-detected from spectrum peaks")
 
     # --- Figure layout: 2×2 grid, one subplot per node ---
     fig, axes = plt.subplots(2, 2, figsize=(14, 8), sharex=True, sharey=True)
     fig.suptitle("FDM FFT Spectrum Diagnostic", fontsize=12)
     axes_flat = axes.flatten()
 
-    bars = []
+    lines = []
+    carrier_lines = []  # one vline per node, updated each frame
     for node_id, ax in enumerate(axes_flat):
         ax.set_title(f"Node {node_id}", fontsize=10)
         ax.set_ylabel("dB")
         ax.set_xlabel("Frequency (Hz)")
         ax.set_ylim(0, DB_RANGE)
-        ax.set_xlim(freqs[0], freqs[-1])
+        ax.set_xlim(freqs[0], 60000)
         ax.grid(True, alpha=0.3)
 
-        # Spectrum line
-        (line,) = ax.plot(freqs, np.zeros(FFT_BINS), color=SPECTRUM_COLOR,
-                          linewidth=0.5, alpha=0.8)
-        bars.append(line)
+        (line,) = ax.plot(
+            freqs_decimated, np.zeros(len(freqs_decimated)),
+            color=SPECTRUM_COLOR, linewidth=1.5, alpha=0.8,
+        )
+        lines.append(line)
 
-        # Carrier frequency markers
-        for nid, cf in enumerate(carrier_freqs):
-            ax.axvline(cf, color=CARRIER_COLORS[nid], linewidth=1.0,
-                       linestyle="--", alpha=0.7,
-                       label=f"N{nid} {cf:.0f} Hz" if node_id == 0 else None)
+        # Carrier marker — starts invisible, positioned at 0
+        vline = ax.axvline(
+            0, color=CARRIER_COLORS[node_id], linewidth=1.5,
+            linestyle="--", alpha=0.7, visible=False,
+        )
+        carrier_lines.append(vline)
 
-    axes_flat[0].legend(loc="upper right", fontsize=7)
+    def _smooth_and_decimate(spectrum):
+        """Moving-average smooth, then take every stride-th sample."""
+        kernel = np.ones(SMOOTH_KERNEL_SIZE) / SMOOTH_KERNEL_SIZE
+        smoothed = np.convolve(spectrum, kernel, mode="same")
+        return smoothed[::DECIMATE_STRIDE]
 
     def update(_frame):
         with _lock:
             snapshot = dict(_spectra)
 
-        for node_id, line in enumerate(bars):
+        for node_id, line in enumerate(lines):
             if node_id in snapshot:
-                line.set_ydata(snapshot[node_id])
+                spectrum = snapshot[node_id]
+                line.set_ydata(_smooth_and_decimate(spectrum))
 
-        return bars
+                # Update carrier marker to strongest peak
+                peak_hz = _find_carrier_peak(spectrum, freqs, PEAK_MIN_HZ)
+                if peak_hz is not None:
+                    seg = carrier_lines[node_id].get_paths()[0].vertices
+                    seg[:, 0] = peak_hz
+                    carrier_lines[node_id].set_visible(True)
+
+        return lines + carrier_lines
 
     _ani = animation.FuncAnimation(
-        fig, update, interval=200, blit=False, cache_frame_data=False
+        fig, update, interval=200, blit=False, cache_frame_data=False,
     )
     plt.tight_layout()
     plt.show()
