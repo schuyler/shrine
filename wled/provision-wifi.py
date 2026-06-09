@@ -83,15 +83,19 @@ def read_packet(ser, timeout=10):
     return None, None
 
 
-def set_hostname(ip: str, hostname: str) -> bool:
+def set_hostname(ip: str, hostname: str, ssid: str, password: str) -> bool:
     """Set WLED mDNS hostname via the settings form.
 
     The /settings/wifi endpoint persists the config and triggers a
     proper reboot. The /json/cfg endpoint saves but doesn't reload
     the mDNS name on reboot.
+
+    SSID and password must be included because this endpoint is a form
+    handler — missing fields are treated as empty, which would wipe the
+    WiFi credentials from flash.
     """
     url = f"http://{ip}/settings/wifi"
-    data = urllib.parse.urlencode({"CM": hostname}).encode()
+    data = urllib.parse.urlencode({"CS0": ssid, "PW0": password, "CM": hostname}).encode()
     req = urllib.request.Request(url, data=data)
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -107,10 +111,13 @@ def find_device_ip(timeout: float = 30) -> str | None:
     import subprocess
     end = time.time() + timeout
     while time.time() < end:
-        result = subprocess.run(
-            ["avahi-browse", "-rpt", "_wled._tcp"],
-            capture_output=True, text=True, timeout=10,
-        )
+        try:
+            result = subprocess.run(
+                ["avahi-browse", "-rpt", "_wled._tcp"],
+                capture_output=True, text=True, timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            continue
         for line in result.stdout.splitlines():
             # avahi-browse -rpt outputs fields separated by ;
             # resolved lines start with '='
@@ -207,7 +214,7 @@ def main():
     if ip:
         print(f"Device found at {ip}")
         print(f"Setting mDNS hostname to '{hostname}'...")
-        if set_hostname(ip, hostname):
+        if set_hostname(ip, hostname, ssid, password):
             print(f"Hostname set. Device rebooting as {hostname}.local...")
         else:
             print("Failed to set hostname.", file=sys.stderr)
