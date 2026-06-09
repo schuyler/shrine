@@ -20,6 +20,8 @@ Controls (shown in the footer at all times):
     ] / [           fine adjust by 0.01
     0-9             set selected channel to 0.0 .. 0.9
     space           set selected channel to 1.0
+    x               mute / unmute the selected channel (keeps its level)
+    t               touch / release the selected node (mute all its channels)
     n / m           zero / max the whole selected node
     z / f           zero / fill every channel
     s               toggle smoothing (eased vs. instant)
@@ -72,9 +74,12 @@ class ManualState:
     """
 
     def __init__(self, smoothing: bool = True, jitter: bool = False):
-        # Row-major grid indexed [node][channel].
+        # Row-major grids indexed [node][channel].
         self.target = [[0.0] * NUM_CHANNELS for _ in range(NUM_NODES)]
         self.current = [[0.0] * NUM_CHANNELS for _ in range(NUM_NODES)]
+        # Mute is a non-destructive layer: a muted channel sends 0.0 but keeps
+        # its target, so "release" then "touch" restores the held pose.
+        self.muted = [[False] * NUM_CHANNELS for _ in range(NUM_NODES)]
         self.smoothing = smoothing
         self.jitter = jitter
 
@@ -97,6 +102,19 @@ class ManualState:
     def set_node(self, node: int, value: float) -> None:
         for c in range(NUM_CHANNELS):
             self.target[node][c] = _clamp(value)
+
+    def toggle_mute(self, node: int, ch: int) -> None:
+        self.muted[node][ch] = not self.muted[node][ch]
+
+    def node_released(self, node: int) -> bool:
+        """True when every channel of a node is muted (the user has let go)."""
+        return all(self.muted[node])
+
+    def toggle_touch(self, node: int) -> None:
+        """Touch or release a whole user: unmute all if released, else mute all."""
+        release = not self.node_released(node)
+        for c in range(NUM_CHANNELS):
+            self.muted[node][c] = release
 
     def update(self) -> None:
         """Advance every channel one tick toward its target."""
@@ -121,6 +139,9 @@ class ManualState:
         for n in range(NUM_NODES):
             args = []
             for c in range(NUM_CHANNELS):
+                if self.muted[n][c]:
+                    args.append(0.0)
+                    continue
                 v = self.current[n][c]
                 if self.jitter:
                     # Decorrelate channels with a per-cell phase offset.
@@ -168,7 +189,8 @@ def _draw(stdscr, state: ManualState, sel_node: int, sel_ch: int, header: str):
     for n in range(NUM_NODES):
         col = LABEL_W + n * CELL_W
         attr = curses.A_BOLD | (curses.A_REVERSE if n == sel_node else 0)
-        put(node_row, col, f"node{n}".center(CELL_W - 1), attr)
+        label = f"node{n} rel" if state.node_released(n) else f"node{n}"
+        put(node_row, col, label.center(CELL_W - 1), attr)
 
     # Channel rows.
     for c, (label, _tag) in enumerate(NODE_CHANNELS):
@@ -179,18 +201,27 @@ def _draw(stdscr, state: ManualState, sel_node: int, sel_ch: int, header: str):
             val = _clamp(state.current[n][c])
             filled = round(val * BAR_WIDTH)
             bar = "█" * filled + "░" * (BAR_WIDTH - filled)
-            cell = f"[{bar}] {state.target[n][c]:.2f}"
+            muted = state.muted[n][c]
             is_sel = (n == sel_node and c == sel_ch)
-            put(row, col, cell, curses.A_REVERSE if is_sel else curses.A_NORMAL)
+            # Muted cells show the held level greyed out with a "mute" tag, so
+            # the dialed-in pose stays visible while output is suppressed.
+            cell = f"[{bar}] {'mute' if muted else f'{state.target[n][c]:.2f}'}"
+            if is_sel:
+                attr = curses.A_REVERSE
+            elif muted:
+                attr = curses.A_DIM
+            else:
+                attr = curses.A_NORMAL
+            put(row, col, cell, attr)
 
     # Status + help.
     status_row = node_row + 1 + NUM_CHANNELS + 1
     sel_label = NODE_CHANNELS[sel_ch][0]
+    sel_state = "muted" if state.muted[sel_node][sel_ch] else f"{state.target[sel_node][sel_ch]:.2f}"
     put(
         status_row,
         0,
-        f"selected: node{sel_node} / {sel_label} = {state.target[sel_node][sel_ch]:.2f}"
-        f"   step {STEP:.2f}",
+        f"selected: node{sel_node} / {sel_label} = {sel_state}   step {STEP:.2f}",
         curses.A_BOLD,
     )
     put(
@@ -202,7 +233,13 @@ def _draw(stdscr, state: ManualState, sel_node: int, sel_ch: int, header: str):
     put(
         status_row + 3,
         0,
-        "n/m zero/max node  z/f zero/fill all  s smooth  J jitter  q quit",
+        "x mute chan  t touch/release node  n/m zero/max node  z/f zero/fill all",
+        curses.A_DIM,
+    )
+    put(
+        status_row + 4,
+        0,
+        "s smooth  J jitter  q quit",
         curses.A_DIM,
     )
 
@@ -255,6 +292,10 @@ def _loop(stdscr, clients: list, rate: float, smoothing: bool, jitter: bool):
             state.set(sel_node, sel_ch, 1.0)
         elif ord("0") <= key <= ord("9"):
             state.set(sel_node, sel_ch, (key - ord("0")) / 10.0)
+        elif key == ord("x"):
+            state.toggle_mute(sel_node, sel_ch)
+        elif key == ord("t"):
+            state.toggle_touch(sel_node)
         elif key == ord("n"):
             state.set_node(sel_node, 0.0)
         elif key == ord("m"):

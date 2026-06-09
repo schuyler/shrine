@@ -61,6 +61,45 @@ def test_bulk_helpers():
     assert all(v == 0.0 for v in state.target[0])
 
 
+def test_mute_zeros_output_but_preserves_target():
+    state = ManualState(smoothing=False)
+    state.set(1, 2, 0.7)
+    state.update()
+    state.toggle_mute(1, 2)
+    args = state.payloads(0.0)["/shrine/node/1"]
+    assert args[2] == 0.0          # output suppressed
+    assert state.target[1][2] == 0.7  # held level preserved
+    # Unmuting restores the held level.
+    state.toggle_mute(1, 2)
+    args = state.payloads(0.0)["/shrine/node/1"]
+    assert args[2] == 0.7
+
+
+def test_touch_release_whole_node():
+    state = ManualState(smoothing=False)
+    state.set_node(0, 0.5)
+    state.update()
+    assert not state.node_released(0)
+
+    state.toggle_touch(0)          # release
+    assert state.node_released(0)
+    assert all(v == 0.0 for v in state.payloads(0.0)["/shrine/node/0"])
+    assert all(v == 0.5 for v in state.target[0])  # pose preserved
+
+    state.toggle_touch(0)          # touch again
+    assert not state.node_released(0)
+    assert all(v == 0.5 for v in state.payloads(0.0)["/shrine/node/0"])
+
+
+def test_touch_releases_when_partially_muted():
+    """A node with any live channel releases fully on touch toggle."""
+    state = ManualState(smoothing=False)
+    state.set_node(3, 0.4)
+    state.toggle_mute(3, 0)        # one channel already muted
+    state.toggle_touch(3)
+    assert state.node_released(3)
+
+
 def test_jitter_stays_in_range_and_preserves_target():
     state = ManualState(smoothing=False, jitter=True)
     state.set_node(0, 0.5)

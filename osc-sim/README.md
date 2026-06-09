@@ -11,7 +11,9 @@ floats — `self_stdev`, `self_carrier_mag`, and three `gsr_mag` cross-couplings
 A fully manual simulator: every one of the 20 OSC floats (4 nodes × 5
 channels) is an independent slider you drive from the keyboard, so you can pose
 any sensor state and hold it. Unlike the automated tool, nothing changes unless
-you change it.
+you change it. Mute is non-destructive — `x` mutes one channel and `t`
+touches/releases a whole node (a "user"), both keeping the dialed-in levels so
+you can simulate people touching and letting go without re-posing.
 
 ```bash
 uv run python osc-sim/manual.py --host localhost          # single target
@@ -27,6 +29,8 @@ Controls (also shown in the footer):
 | `]` / `[` | fine adjust by 0.01 |
 | `0`–`9` | set the selected channel to 0.0 .. 0.9 |
 | space | set the selected channel to 1.0 |
+| `x` | mute / unmute the selected channel (keeps its dialed level) |
+| `t` | touch / release the selected node — mute all its channels at once |
 | `n` / `m` | zero / max the whole selected node |
 | `z` / `f` | zero / fill every channel |
 | `s` | toggle smoothing (eased transitions vs. instant) |
