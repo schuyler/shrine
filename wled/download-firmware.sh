@@ -27,7 +27,7 @@ if [ -f "$PARTITIONS_CSV" ] && [ ! -f "$PARTITIONS_BIN" ]; then
     GEN_PART=$(find ~/.platformio -name 'gen_esp32part.py' 2>/dev/null | head -1)
     if [ -n "$GEN_PART" ]; then
         echo "Generating partition table..."
-        python3 "$GEN_PART" "$PARTITIONS_CSV" "$PARTITIONS_BIN"
+        uv run python "$GEN_PART" "$PARTITIONS_CSV" "$PARTITIONS_BIN"
     else
         echo "Warning: gen_esp32part.py not found. Generate partitions.bin manually." >&2
     fi
