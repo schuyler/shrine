@@ -43,6 +43,11 @@ def build_dispatcher(state: PadState) -> Dispatcher:
         state.set_tempo(float(bpm), time.monotonic())
     dispatcher.map("/leds/tempo", tempo_handler)
 
+    # /leds/group <pad0> <pad1> ... (variable number of 0-indexed pad IDs)
+    def group_handler(address, *args):
+        state.set_group(frozenset(int(p) for p in args))
+    dispatcher.map("/leds/group", group_handler)
+
     def default_handler(address, *args):
         logger.debug("Unrecognized OSC address: %s", address)
     dispatcher.set_default_handler(default_handler)

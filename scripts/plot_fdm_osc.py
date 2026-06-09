@@ -39,16 +39,12 @@ from matplotlib.widgets import Button
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import BlockingOSCUDPServer
 
+from leds.sensor_state import GSR_PAIRS, NODE_GSR_MAPPING
+
 DISPLAY_SECONDS = 10   # visible time window
 HISTORY = 1500         # sample buffer per channel
 EMA_TAU = 0.3          # EMA time constant in seconds
 INTERP_FACTOR = 3      # spline densification for smooth peaks
-
-# 6 pairwise combinations of 4 nodes (0-indexed)
-GSR_PAIRS = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
-
-# Node N GSR slots → global pair indices (mirrors leds/sensor_state.py, 0-indexed)
-NODE_GSR_MAPPING = [[0, 1, 2], [3, 4, 0], [5, 1, 3], [2, 4, 5]]
 
 PAIR_COLORS = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4", "#42d4f4"]
 PAIR_LABELS = [f"({i},{j})" for i, j in GSR_PAIRS]

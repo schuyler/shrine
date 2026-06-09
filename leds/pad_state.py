@@ -26,6 +26,7 @@ class PadState:
         self._sync_time = 0.0
         self._tempo_gen = 0
         self._signature_colors: dict[int, list[int]] = {}
+        self._group: frozenset[int] = frozenset()
 
     def set_cap(self, pad: int, value: float) -> None:
         with self._lock:
@@ -58,6 +59,14 @@ class PadState:
             self._bpm = bpm
             self._sync_time = sync_time
             self._tempo_gen += 1
+
+    def set_group(self, members: frozenset[int]) -> None:
+        with self._lock:
+            self._group = members
+
+    def group(self) -> frozenset[int]:
+        with self._lock:
+            return self._group
 
     def set_signature_colors(self, colors: dict[int, list[int]]) -> None:
         with self._lock:

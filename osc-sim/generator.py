@@ -19,6 +19,8 @@ import time
 
 from pythonosc.udp_client import SimpleUDPClient
 
+from leds.sensor_state import NODE_GSR_MAPPING
+
 
 class BroadcastUDPClient(SimpleUDPClient):
     """UDP client with SO_BROADCAST for sending to broadcast addresses."""
@@ -27,16 +29,9 @@ class BroadcastUDPClient(SimpleUDPClient):
         super().__init__(address, port)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
-# GSR pairs: all unique combinations of pads 1-4
+# GSR pairs using 1-indexed pad IDs to match ARC_PHASES scenario labels.
+# The canonical 0-indexed version lives in leds.sensor_state.GSR_PAIRS.
 GSR_PAIRS = [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)]
-
-# Node N GSR slots → global pair indices (mirrors leds/sensor_state.py)
-# GSR_PAIRS uses 1-indexed pad IDs: [(1,2), (1,3), (1,4), (2,3), (2,4), (3,4)]
-# Node 0 (pad 1) sees pads 2,3,4 → pairs (1,2),(1,3),(1,4) → indices 0,1,2
-# Node 1 (pad 2) sees pads 3,4,1 → pairs (2,3),(2,4),(1,2) → indices 3,4,0
-# Node 2 (pad 3) sees pads 4,1,2 → pairs (3,4),(1,3),(2,3) → indices 5,1,3
-# Node 3 (pad 4) sees pads 1,2,3 → pairs (1,4),(2,4),(3,4) → indices 2,4,5
-NODE_GSR_MAPPING = [[0, 1, 2], [3, 4, 0], [5, 1, 3], [2, 4, 5]]
 
 # Scale factors: firmware now sends 0-1 normalized values directly
 STDEV_SCALE = 1.0
