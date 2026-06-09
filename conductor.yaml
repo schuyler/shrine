@@ -1,0 +1,45 @@
+# Conductor state machine configuration
+# All time values are in seconds.
+
+sensing:
+  # Schmitt trigger thresholds for pad presence (cap signal, normalized 0-1)
+  cap_on_threshold: 0.6
+  cap_off_threshold: 0.4
+  cap_hold_on: 0.3       # must stay above on_threshold this long to become engaged
+  cap_hold_off: 0.5      # must stay below off_threshold this long to become disengaged
+
+  # Schmitt trigger thresholds for pad-pair coupling (gsr_mag, normalized 0-1)
+  gsr_on_threshold: 0.4
+  gsr_off_threshold: 0.25
+  gsr_hold_on: 0.5
+  gsr_hold_off: 1.0
+
+  # How long a connection condition must hold continuously to confirm an upward transition
+  confirm_hold: 5.0
+
+buckets:
+  seeking:
+    fill_rate: 1.0        # seconds of credit per second while ≥1 pad engaged
+    drain_rate: 0.5       # seconds drained per second while no pad engaged
+    full_at: 120.0
+    entry_seed: 0.0
+
+  aligning:
+    fill_rate: 1.0        # fills while group ≥ 2
+    drain_rate: 0.5
+    full_at: 120.0
+    entry_seed: 60.0
+
+  energizing:
+    fill_rate: 1.0        # fills while group ≥ 3
+    drain_rate: 0.5
+    full_at: 60.0
+    entry_seed: 30.0
+
+  ascending:
+    dwell: 60.0           # fixed dwell before decaying to Energizing
+
+idle:
+  # Global idle bucket: fills while 0 pads engaged, forces Quiet at timeout
+  timeout: 180.0
+  drain_rate: 1.0         # drains at 1:1 while any pad is engaged
