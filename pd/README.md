@@ -91,7 +91,8 @@ Dev (GUI, with the simulator):
 
 ```bash
 pd -path pd pd/main.pd            # open the engine
-uv run python osc-sim/generator.py --host localhost   # feed it sensor data
+uv run python osc-sim/generator.py --host localhost   # automated sensor data
+uv run python osc-sim/manual.py    --host localhost   # hands-on sensor data
 ```
 
 Production (headless), per `Pd_Architecture`:
