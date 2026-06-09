@@ -39,6 +39,25 @@ Controls (also shown in the footer):
 
 Useful flags: `--rate HZ` (default 30), `--no-smoothing`, `--jitter`.
 
+### Desktop GUI (`manual_gui.py`)
+
+`manual_gui.py` is a Qt (PySide6) desktop front-end over the *same* state model
+as `manual.py` — identical OSC, smoothing, jitter and mute behaviour, presented
+as a mixer of vertical faders with per-channel mute buttons and a per-node
+touch/release button. PySide6 is an optional dependency, so install the `gui`
+group first:
+
+```bash
+uv sync --group gui
+uv run --group gui python osc-sim/manual_gui.py --host localhost
+```
+
+Each node is a column of five faders; the label above a fader shows the live
+value being sent and the slider sets the target. The `M` button mutes a single
+channel; the per-column **Release/Touch** button mutes or restores a whole user
+at once. Global toggles for smoothing and jitter and `Zero all`/`Fill all`
+buttons sit along the bottom. Same CLI flags as `manual.py`.
+
 ## `generator.py` — automated scenario
 
 Plays a scripted creative arc (Silence → Solo → … → Crescendo → Decay) with

@@ -21,3 +21,9 @@ dependencies = [
 dev = [
     "pytest",
 ]
+# Optional: the Qt desktop front-end for the manual sensor simulator.
+# Install with `uv sync --group gui`; run with
+# `uv run --group gui python osc-sim/manual_gui.py`.
+gui = [
+    "pyside6",
+]
