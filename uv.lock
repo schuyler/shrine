@@ -955,6 +955,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pip"
+version = "26.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/01/91/47e7d486260f618783899587af63ccf7980fb60245c3e63dd4571c6b57ad/pip-26.1.2.tar.gz", hash = "sha256:f49cd134c61cf2fd75e0ce2676db03e4054504a5a4986d00f8299ae632dc4605", size = 1840799 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5d/95/6b5cb3461ea5673ba0995989746db58eb18b91b54dbf331e72f569540946/pip-26.1.2-py3-none-any.whl", hash = "sha256:382ff9f685ee3bc25864f820aa50505825f10f5458ffff07e30a6d96e5715cab", size = 1813144 },
+]
+
+[[package]]
 name = "platformio"
 version = "6.1.19"
 source = { registry = "https://pypi.org/simple" }
@@ -1007,12 +1016,35 @@ wheels = [
 ]
 
 [[package]]
+name = "pyfluidsynth"
+version = "1.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a3/40/00985fe453bf85cfe1d586f236b97f84401e8ac203588e51840955ed835a/pyfluidsynth-1.4.0.tar.gz", hash = "sha256:6a9e1dbaf469fd11f45184f37ec28e198b1d6495ad74f61dc4a57726b2b1ba31", size = 35128 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/40/b6/7387ecf46c01df39ed36d9700312a11d8455efe04803b8472a333ff9d51b/pyfluidsynth-1.4.0-py3-none-any.whl", hash = "sha256:93f0a0e8d5b34f974010473f9985fc52e1379e8f316892afeb2de1d759439ca3", size = 23933 },
+]
+
+[[package]]
 name = "pygments"
 version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c3/b2/bc9c9196916376152d655522fdcebac55e66de6603a76a02bca1b6414f6c/pygments-2.20.0.tar.gz", hash = "sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f", size = 4955991 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl", hash = "sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176", size = 1231151 },
+]
+
+[[package]]
+name = "pyo"
+version = "1.0.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/77/c8/e949d16170a9f448994be74963fad54557c13d1c4e4302590fa35280ae55/pyo-1.0.5.tar.gz", hash = "sha256:e042d947a0b641b400e228f9e21eeca21df8bf4895c6dbd013f87638d7728e31", size = 5249926 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/06/bb/bd246a7901dc1991b97049376e6238cbb85b708515db6203617b46e16a00/pyo-1.0.5-cp311-cp311-macosx_12_0_x86_64.whl", hash = "sha256:0e93466fa5c417ccf17c80c4e476047d4d12582e84ccbfd19c289a018212a8dc", size = 9722423 },
+    { url = "https://files.pythonhosted.org/packages/98/d5/980fb66cd0ae6f7f5f9a8c6fe3c447b13a610f20f9586c22d1f1d11407dc/pyo-1.0.5-cp311-cp311-macosx_13_0_arm64.whl", hash = "sha256:dc486007c1e16dea08509561052702fee43000be13c093a813cd94cb8f7483f8", size = 9702237 },
+    { url = "https://files.pythonhosted.org/packages/18/71/59cd7ad1e51ec8b6388ccefdbb7e35a0f135723123e7558ee531de0670a4/pyo-1.0.5-cp311-cp311-win_amd64.whl", hash = "sha256:2034c1c5e22c7de4a400d1967c50d217bdd3bed68f1d2eb50b7a01d3d3454ab4", size = 8551643 },
 ]
 
 [[package]]
@@ -1265,7 +1297,10 @@ dependencies = [
     { name = "esptool" },
     { name = "matplotlib" },
     { name = "numpy" },
+    { name = "pip" },
     { name = "platformio" },
+    { name = "pyfluidsynth" },
+    { name = "pyo" },
     { name = "pyserial" },
     { name = "python-osc" },
     { name = "pyyaml" },
@@ -1285,7 +1320,10 @@ requires-dist = [
     { name = "esptool" },
     { name = "matplotlib" },
     { name = "numpy" },
+    { name = "pip" },
     { name = "platformio" },
+    { name = "pyfluidsynth" },
+    { name = "pyo" },
     { name = "pyserial" },
     { name = "python-osc" },
     { name = "pyyaml" },
