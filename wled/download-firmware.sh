@@ -20,17 +20,12 @@ wget -q --show-progress -O "$SCRIPT_DIR/esp32_bootloader_v4.bin" "$BOOTLOADER_UR
 echo "Downloading WLED ${VERSION} firmware..."
 wget -q --show-progress -O "$SCRIPT_DIR/WLED_${VERSION}_ESP32.bin" "$FIRMWARE_URL"
 
-# Generate partition table binary if gen_esp32part.py is available
+# Generate partition table binary
 PARTITIONS_CSV="$SCRIPT_DIR/partitions.csv"
 PARTITIONS_BIN="$SCRIPT_DIR/partitions.bin"
-if [ -f "$PARTITIONS_CSV" ] && [ ! -f "$PARTITIONS_BIN" ]; then
-    GEN_PART=$(find ~/.platformio -name 'gen_esp32part.py' 2>/dev/null | head -1)
-    if [ -n "$GEN_PART" ]; then
-        echo "Generating partition table..."
-        uv run python "$GEN_PART" "$PARTITIONS_CSV" "$PARTITIONS_BIN"
-    else
-        echo "Warning: gen_esp32part.py not found. Generate partitions.bin manually." >&2
-    fi
+if [ -f "$PARTITIONS_CSV" ]; then
+    echo "Generating partition table..."
+    uv run python "$SCRIPT_DIR/gen_esp32part.py" "$PARTITIONS_CSV" "$PARTITIONS_BIN"
 fi
 
 echo "Done. Flash with: ./install-wled.sh WLED_${VERSION}_ESP32.bin"

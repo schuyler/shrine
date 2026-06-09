@@ -24,11 +24,8 @@ FIRMWARE="${1:-$SCRIPT_DIR/WLED_16.0.0_ESP32.bin}"
 
 # Auto-generate partitions.bin from CSV if missing
 if [ ! -f "$PARTITIONS" ] && [ -f "$PARTITIONS_CSV" ]; then
-    GEN_PART=$(find ~/.platformio -name 'gen_esp32part.py' 2>/dev/null | head -1)
-    if [ -n "$GEN_PART" ]; then
-        echo "Generating partition table..."
-        uv run python "$GEN_PART" "$PARTITIONS_CSV" "$PARTITIONS"
-    fi
+    echo "Generating partition table..."
+    uv run python "$SCRIPT_DIR/gen_esp32part.py" "$PARTITIONS_CSV" "$PARTITIONS"
 fi
 
 for f in "$BOOTLOADER" "$PARTITIONS" "$FIRMWARE"; do
