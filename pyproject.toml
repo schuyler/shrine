@@ -14,9 +14,7 @@ dependencies = [
     "requests",
     "sounddevice",
     "esptool",
-    "esp-idf-nvs-partition-gen",
-    "pyo",
-    "pyfluidsynth",
+    "esp-idf-nvs-partition-gen"
 ]
 
 [dependency-groups]
