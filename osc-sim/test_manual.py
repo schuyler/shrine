@@ -3,7 +3,9 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(__file__))
+_HERE = os.path.dirname(__file__)
+sys.path.insert(0, _HERE)                       # for `import manual`/`generator`
+sys.path.insert(0, os.path.dirname(_HERE))      # repo root, for `import leds`
 
 from manual import NUM_CHANNELS, NUM_NODES, ManualState
 
