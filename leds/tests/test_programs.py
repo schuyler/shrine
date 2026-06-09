@@ -10,8 +10,8 @@ from leds.palettes import Palette
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_pad(cap=0.0, heartbeat=0.0, flux=0.0):
-    return PadSnapshot(cap=cap, heartbeat=heartbeat, flux=flux)
+def make_pad(cap=0.0, heartbeat=0.0, flux=0.0, signature_color=None):
+    return PadSnapshot(cap=cap, heartbeat=heartbeat, flux=flux, signature_color=signature_color)
 
 
 def make_palette():
@@ -238,3 +238,63 @@ class TestBreatheProgram:
         segs_low, _ = prog.render(pads_low, palette, clock, {})
         segs_high, _ = prog.render(pads_high, palette, clock, {})
         assert segs_high[0].bri > segs_low[0].bri
+
+
+# ---------------------------------------------------------------------------
+# Breathe + signature_color
+# ---------------------------------------------------------------------------
+
+class TestBreatheProgramSignatureColor:
+
+    def test_breathe_with_signature_color_uses_it_as_base_color(self):
+        """When pad has signature_color, breathe uses it instead of palette idle."""
+        prog = get_program("breathe")
+        palette = make_palette()
+        sig_color = [200, 100, 50]
+        pad = make_pad(cap=0.0, signature_color=sig_color)
+        segments, _ = prog.render([pad], palette, make_clock(), {})
+        # At cap=0, color should be the signature_color, not palette idle
+        assert segments[0].col == [sig_color]
+
+    def test_breathe_with_signature_color_high_cap_blends_toward_warm(self):
+        """At cap=1 with signature_color, breathe blends toward palette warm."""
+        prog = get_program("breathe")
+        palette = make_palette()
+        sig_color = [200, 100, 50]
+        pad = make_pad(cap=1.0, signature_color=sig_color)
+        segments, _ = prog.render([pad], palette, make_clock(), {})
+        # At cap=1, color should match palette warm (full lerp away from base)
+        assert segments[0].col == [palette.get("warm")]
+
+    def test_breathe_without_signature_color_uses_palette_idle(self):
+        """When signature_color is None, breathe falls back to palette idle (existing behavior)."""
+        prog = get_program("breathe")
+        palette = make_palette()
+        pad = make_pad(cap=0.0, signature_color=None)
+        segments, _ = prog.render([pad], palette, make_clock(), {})
+        assert segments[0].col == [palette.get("idle")]
+
+    def test_breathe_signature_color_mid_cap_differs_from_no_signature_color(self):
+        """At cap=0.5, a pad with signature_color produces a different color than one without."""
+        prog = get_program("breathe")
+        palette = make_palette()
+        sig_color = [200, 100, 50]
+        pad_with = make_pad(cap=0.5, signature_color=sig_color)
+        pad_without = make_pad(cap=0.5, signature_color=None)
+        segs_with, _ = prog.render([pad_with], palette, make_clock(), {})
+        segs_without, _ = prog.render([pad_without], palette, make_clock(), {})
+        # The two colors should differ because they start from different base colors
+        assert segs_with[0].col != segs_without[0].col
+
+    def test_breathe_mixed_pads_some_with_signature_color(self):
+        """Pads with and without signature_color render independently in one call."""
+        prog = get_program("breathe")
+        palette = make_palette()
+        sig_color = [200, 100, 50]
+        pads = [
+            make_pad(cap=0.0, signature_color=sig_color),
+            make_pad(cap=0.0, signature_color=None),
+        ]
+        segments, _ = prog.render(pads, palette, make_clock(), {})
+        assert segments[0].col == [sig_color]
+        assert segments[1].col == [palette.get("idle")]

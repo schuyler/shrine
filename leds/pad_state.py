@@ -9,6 +9,7 @@ class PadSnapshot:
     cap: float        # 0-1
     heartbeat: float  # Hz, 0 = none
     flux: float       # 0-1
+    signature_color: list[int] | None = None
 
 
 class PadState:
@@ -24,6 +25,7 @@ class PadState:
         self._bpm = 0.0
         self._sync_time = 0.0
         self._tempo_gen = 0
+        self._signature_colors: dict[int, list[int]] = {}
 
     def set_cap(self, pad: int, value: float) -> None:
         with self._lock:
@@ -57,6 +59,14 @@ class PadState:
             self._sync_time = sync_time
             self._tempo_gen += 1
 
+    def set_signature_colors(self, colors: dict[int, list[int]]) -> None:
+        with self._lock:
+            self._signature_colors = {
+                self._index[pad]: color
+                for pad, color in colors.items()
+                if pad in self._index
+            }
+
     def snapshot(self) -> tuple:
         with self._lock:
             snapshots = [
@@ -64,6 +74,7 @@ class PadState:
                     cap=self._cap[i],
                     heartbeat=self._heartbeat[i],
                     flux=self._flux[i],
+                    signature_color=self._signature_colors.get(i),
                 )
                 for i in range(len(self._pads))
             ]

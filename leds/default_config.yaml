@@ -1,6 +1,18 @@
 osc_listen_host: "0.0.0.0"
 osc_listen_port: 9000
-wled_host: "192.168.4.1"
+wled_targets:
+  - host: "wled-a.local"
+    pad: 0
+    color: [255, 40, 0]
+  - host: "wled-b.local"
+    pad: 1
+    color: [0, 200, 255]
+  - host: "wled-c.local"
+    pad: 2
+    color: [180, 0, 255]
+  - host: "wled-d.local"
+    pad: 3
+    color: [40, 255, 0]
 wled_port: 80
 wled_timeout: 0.1
 update_rate_hz: 30

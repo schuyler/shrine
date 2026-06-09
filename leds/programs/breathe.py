@@ -24,6 +24,7 @@ class BreatheProgram(Program):
         for pad in pads:
             cap = max(0.0, min(1.0, pad.cap))
             bri = _clamp(round(20 + cap * 235), 20, 255)
-            color = _lerp_color(idle, warm, cap)
+            base_color = pad.signature_color if pad.signature_color is not None else idle
+            color = _lerp_color(base_color, warm, cap)
             segments.append(SegmentParams(col=[color], bri=bri))
         return segments, {}

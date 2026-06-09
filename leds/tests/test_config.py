@@ -9,7 +9,7 @@ from leds.config import load_config
 NEW_KEYS = [
     "osc_listen_host",
     "osc_listen_port",
-    "wled_host",
+    "wled_targets",
     "wled_port",
     "wled_timeout",
     "update_rate_hz",
@@ -116,12 +116,19 @@ class TestCustomConfigOverrides:
         try:
             config = load_config(path)
             default_config = load_config()
-            assert config["wled_host"] == default_config["wled_host"]
+            assert config["wled_targets"] == default_config["wled_targets"]
         finally:
             os.unlink(path)
 
     def test_custom_pads_override(self):
-        path = self._write_yaml("pads: [0, 1]\n")
+        path = self._write_yaml(
+            "pads: [0, 1]\n"
+            "wled_targets:\n"
+            "  - host: wled-a.local\n"
+            "    pad: 0\n"
+            "  - host: wled-b.local\n"
+            "    pad: 1\n"
+        )
         try:
             config = load_config(path)
             assert config["pads"] == [0, 1]
@@ -157,3 +164,178 @@ class TestMissingFile:
         with pytest.raises(Exception) as exc_info:
             load_config(bad_path)
         assert bad_path in str(exc_info.value) or "nonexistent" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# wled_targets validation (not yet implemented — expected to fail Red TDD)
+# ---------------------------------------------------------------------------
+
+class TestWledTargetsValidation:
+    """Tests for _validate_wled_targets() and load_config() target validation.
+
+    These tests expect load_config() to perform structural validation of
+    wled_targets. The validation logic does not exist yet.
+    """
+
+    def _write_yaml(self, content):
+        f = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+        )
+        f.write(content)
+        f.flush()
+        f.close()
+        return f.name
+
+    def _valid_targets_yaml(self):
+        return (
+            "wled_targets:\n"
+            "  - host: 192.168.1.10\n"
+            "    port: 80\n"
+            "    pad: 0\n"
+            "  - host: 192.168.1.11\n"
+            "    port: 80\n"
+            "    pad: 1\n"
+            "pads: [0, 1]\n"
+        )
+
+    def test_valid_wled_targets_passes_validation(self):
+        path = self._write_yaml(self._valid_targets_yaml())
+        try:
+            config = load_config(path)
+            assert "wled_targets" in config
+        finally:
+            os.unlink(path)
+
+    def test_missing_wled_targets_raises_value_error(self):
+        # A config that explicitly unsets wled_targets (overrides default to None/absent)
+        path = self._write_yaml("wled_targets: null\npads: [0, 1]\n")
+        try:
+            with pytest.raises(ValueError, match="wled_targets"):
+                load_config(path)
+        finally:
+            os.unlink(path)
+
+    def test_target_missing_host_raises_value_error(self):
+        yaml_content = (
+            "wled_targets:\n"
+            "  - port: 80\n"
+            "    pad: 0\n"
+            "pads: [0]\n"
+        )
+        path = self._write_yaml(yaml_content)
+        try:
+            with pytest.raises(ValueError, match="host"):
+                load_config(path)
+        finally:
+            os.unlink(path)
+
+    def test_target_missing_pad_raises_value_error(self):
+        yaml_content = (
+            "wled_targets:\n"
+            "  - host: 192.168.1.10\n"
+            "    port: 80\n"
+            "pads: [0]\n"
+        )
+        path = self._write_yaml(yaml_content)
+        try:
+            with pytest.raises(ValueError, match="pad"):
+                load_config(path)
+        finally:
+            os.unlink(path)
+
+    def test_duplicate_pad_values_raises_value_error(self):
+        yaml_content = (
+            "wled_targets:\n"
+            "  - host: 192.168.1.10\n"
+            "    port: 80\n"
+            "    pad: 0\n"
+            "  - host: 192.168.1.11\n"
+            "    port: 80\n"
+            "    pad: 0\n"
+            "pads: [0]\n"
+        )
+        path = self._write_yaml(yaml_content)
+        try:
+            with pytest.raises(ValueError):
+                load_config(path)
+        finally:
+            os.unlink(path)
+
+    def test_color_not_three_element_int_list_raises_value_error(self):
+        yaml_content = (
+            "wled_targets:\n"
+            "  - host: 192.168.1.10\n"
+            "    port: 80\n"
+            "    pad: 0\n"
+            "    color: [255, 0]\n"
+            "pads: [0]\n"
+        )
+        path = self._write_yaml(yaml_content)
+        try:
+            with pytest.raises(ValueError, match="color"):
+                load_config(path)
+        finally:
+            os.unlink(path)
+
+    def test_color_null_is_valid(self):
+        yaml_content = (
+            "wled_targets:\n"
+            "  - host: 192.168.1.10\n"
+            "    port: 80\n"
+            "    pad: 0\n"
+            "    color: null\n"
+            "pads: [0]\n"
+        )
+        path = self._write_yaml(yaml_content)
+        try:
+            config = load_config(path)
+            assert config["wled_targets"][0]["color"] is None
+        finally:
+            os.unlink(path)
+
+    def test_color_absent_is_valid(self):
+        yaml_content = (
+            "wled_targets:\n"
+            "  - host: 192.168.1.10\n"
+            "    port: 80\n"
+            "    pad: 0\n"
+            "pads: [0]\n"
+        )
+        path = self._write_yaml(yaml_content)
+        try:
+            config = load_config(path)
+            assert "wled_targets" in config
+        finally:
+            os.unlink(path)
+
+    def test_pad_set_in_targets_must_match_config_pads(self):
+        """Pad numbers in wled_targets must exactly match config['pads']."""
+        yaml_content = (
+            "wled_targets:\n"
+            "  - host: 192.168.1.10\n"
+            "    port: 80\n"
+            "    pad: 5\n"
+            "pads: [0, 1, 2, 3]\n"
+        )
+        path = self._write_yaml(yaml_content)
+        try:
+            with pytest.raises(ValueError):
+                load_config(path)
+        finally:
+            os.unlink(path)
+
+    def test_color_non_integer_elements_raises_value_error(self):
+        yaml_content = (
+            "wled_targets:\n"
+            "  - host: 192.168.1.10\n"
+            "    port: 80\n"
+            "    pad: 0\n"
+            "    color: [255, 'red', 0]\n"
+            "pads: [0]\n"
+        )
+        path = self._write_yaml(yaml_content)
+        try:
+            with pytest.raises(ValueError, match="color"):
+                load_config(path)
+        finally:
+            os.unlink(path)

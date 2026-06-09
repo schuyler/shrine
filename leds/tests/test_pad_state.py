@@ -5,6 +5,11 @@ import pytest
 from leds.pad_state import PadSnapshot, PadState
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
 class TestPadStateInit:
     def test_snapshot_returns_correct_number_of_pads(self):
         state = PadState([0, 1, 2, 3])
@@ -308,3 +313,61 @@ class TestPadStateThreadSafety:
             t.join()
 
         assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# PadSnapshot.signature_color
+# ---------------------------------------------------------------------------
+
+class TestPadSnapshotSignatureColor:
+
+    def test_default_signature_color_is_none(self):
+        snap = PadSnapshot(cap=0.0, heartbeat=0.0, flux=0.0)
+        assert snap.signature_color is None
+
+    def test_explicit_signature_color_stored(self):
+        snap = PadSnapshot(cap=0.0, heartbeat=0.0, flux=0.0, signature_color=[255, 0, 0])
+        assert snap.signature_color == [255, 0, 0]
+
+
+# ---------------------------------------------------------------------------
+# PadState.set_signature_colors
+# ---------------------------------------------------------------------------
+
+class TestPadStateSetSignatureColors:
+
+    def test_set_signature_colors_populates_snapshots(self):
+        state = PadState([0, 1, 2, 3])
+        state.set_signature_colors({0: [255, 0, 0], 2: [0, 255, 0]})
+        snapshots, *_ = state.snapshot()
+        assert snapshots[0].signature_color == [255, 0, 0]
+        assert snapshots[2].signature_color == [0, 255, 0]
+
+    def test_pads_without_configured_color_get_none(self):
+        state = PadState([0, 1, 2, 3])
+        state.set_signature_colors({0: [255, 0, 0]})
+        snapshots, *_ = state.snapshot()
+        assert snapshots[1].signature_color is None
+        assert snapshots[2].signature_color is None
+        assert snapshots[3].signature_color is None
+
+    def test_unknown_pad_numbers_are_silently_ignored(self):
+        state = PadState([0, 1, 2, 3])
+        # pad 99 not in configured pads — must not raise
+        state.set_signature_colors({0: [255, 0, 0], 99: [0, 0, 255]})
+        snapshots, *_ = state.snapshot()
+        assert snapshots[0].signature_color == [255, 0, 0]
+
+    def test_set_signature_colors_empty_mapping_leaves_all_none(self):
+        state = PadState([0, 1, 2, 3])
+        state.set_signature_colors({})
+        snapshots, *_ = state.snapshot()
+        for snap in snapshots:
+            assert snap.signature_color is None
+
+    def test_set_signature_colors_overwrite(self):
+        state = PadState([0, 1, 2, 3])
+        state.set_signature_colors({0: [255, 0, 0]})
+        state.set_signature_colors({0: [0, 0, 255]})
+        snapshots, *_ = state.snapshot()
+        assert snapshots[0].signature_color == [0, 0, 255]

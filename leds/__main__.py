@@ -13,7 +13,7 @@ from leds.osc_input import build_dispatcher
 from leds.pad_state import PadState
 from leds.palettes import load_palettes
 from leds.programs import get_program
-from leds.wled import WledClient
+from leds.wled import WledDispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +35,16 @@ def main():
     state.set_program(config["default_program"])
     state.set_palette(config["default_palette"])
 
+    sig_colors = {t["pad"]: t["color"] for t in config["wled_targets"] if t.get("color") is not None}
+    if sig_colors:
+        state.set_signature_colors(sig_colors)
+
     dispatcher = build_dispatcher(state)
-    client = WledClient(host=config["wled_host"], port=config["wled_port"],
-                        timeout=config["wled_timeout"])
+    wled = WledDispatcher(
+        targets=config["wled_targets"],
+        port=config["wled_port"],
+        timeout=config["wled_timeout"],
+    )
 
     palettes = load_palettes()
 
@@ -100,7 +107,8 @@ def main():
             phase = clock.phase(t0)
             segments, program_state = program.render(pad_snaps, palette, phase, program_state)
 
-            rtt = client.send(segments)
+            pad_segments = dict(zip(pads_config, segments))
+            rtt = wled.send(pad_segments)
 
             if auto_latency and rtt is not None:
                 if rtt_ema is None:
@@ -115,6 +123,7 @@ def main():
                 time.sleep(remaining)
     finally:
         server.shutdown()
+        wled.close()
 
 
 if __name__ == "__main__":
