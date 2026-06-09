@@ -102,17 +102,22 @@ def set_hostname(ip: str, hostname: str) -> bool:
         return False
 
 
-def find_device_ip(mac_suffix: str, timeout: float = 30) -> str | None:
-    """Wait for a device to appear in the neighbor table."""
+def find_device_ip(timeout: float = 30) -> str | None:
+    """Wait for a WLED device to appear via mDNS service browse."""
     import subprocess
     end = time.time() + timeout
     while time.time() < end:
         result = subprocess.run(
-            ["ip", "neigh"], capture_output=True, text=True,
+            ["avahi-browse", "-rpt", "_wled._tcp"],
+            capture_output=True, text=True, timeout=10,
         )
         for line in result.stdout.splitlines():
-            if mac_suffix.lower() in line.lower() and "REACHABLE" in line:
-                return line.split()[0]
+            # avahi-browse -rpt outputs fields separated by ;
+            # resolved lines start with '='
+            if line.startswith("="):
+                fields = line.split(";")
+                if len(fields) >= 8:
+                    return fields[7]  # IP address
         time.sleep(2)
     return None
 
@@ -197,9 +202,7 @@ def main():
 
     if not ip:
         print("Waiting for device on network...")
-        # Read MAC from WLED info if we have an IP, otherwise scan
-        # Use the esptool chip_id or scan neighbor table
-        ip = find_device_ip("70:4b:ca", timeout=30)
+        ip = find_device_ip(timeout=30)
 
     if ip:
         print(f"Device found at {ip}")
