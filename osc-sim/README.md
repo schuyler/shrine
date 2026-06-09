@@ -58,6 +58,23 @@ channel; the per-column **Release/Touch** button mutes or restores a whole user
 at once. Global toggles for smoothing and jitter and `Zero all`/`Fill all`
 buttons sit along the bottom. Same CLI flags as `manual.py`.
 
+The GUI is fully keyboard-drivable with the same keys as the curses tool — a
+highlighted cursor marks the selected channel:
+
+| Key | Action |
+|-----|--------|
+| arrows / `hjkl` | move the selection cursor |
+| `+` / `-` | adjust selected channel by 0.05 |
+| `]` / `[` | fine adjust by 0.01 |
+| `0`–`9` | set selected channel to 0.0 .. 0.9 |
+| space | set selected channel to 1.0 |
+| `x` | mute / unmute the selected channel |
+| `t` | touch / release the selected node |
+| `n` / `m` | zero / max the whole selected node |
+| `z` / `f` | zero / fill every channel |
+| `s` / `J` | toggle smoothing / jitter |
+| `q` | quit |
+
 ## `generator.py` — automated scenario
 
 Plays a scripted creative arc (Silence → Solo → … → Crescendo → Decay) with
