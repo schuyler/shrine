@@ -59,6 +59,34 @@ class StateMachine:
     def state(self) -> State:
         return self._state
 
+    @property
+    def bucket_fraction(self) -> float:
+        """Bucket fill fraction for the current state (0.0–1.0).
+
+        QUIET and ASCENDING return 0.0 (no meaningful fill level).
+        SEEKING/ALIGNING/ENERGIZING return bucket / full_at, clamped to [0, 1].
+        """
+        name = self._state.name.lower()
+        if name in self._buckets and "full_at" in self._buckets[name]:
+            full_at = self._buckets[name]["full_at"]
+            if full_at <= 0:
+                return 0.0
+            return min(1.0, self._bucket / full_at)
+        return 0.0
+
+    def tempo(self, tempo_config: dict) -> float:
+        """Compute current BPM from state and bucket fill level.
+
+        tempo_config maps state names to either a fixed BPM (scalar) or a
+        [lo, hi] range that is linearly interpolated by bucket_fraction.
+        """
+        name = self._state.name.lower()
+        val = tempo_config[name]
+        if isinstance(val, list):
+            lo, hi = val
+            return lo + self.bucket_fraction * (hi - lo)
+        return float(val)
+
     def tick(self, snapshot: SensorSnapshot, dt: float) -> list[CueEvent]:
         """Advance the FSM by dt seconds given the current sensor snapshot.
 

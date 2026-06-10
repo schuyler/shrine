@@ -346,3 +346,137 @@ class TestFullArc:
         assert State.ALIGNING in states_seen
         assert State.ENERGIZING in states_seen
         assert State.ASCENDING in states_seen
+
+
+# ---------------------------------------------------------------------------
+# Tempo
+# ---------------------------------------------------------------------------
+
+_TEMPO_CFG = {
+    "quiet": 50,
+    "seeking": [60, 70],
+    "aligning": [70, 80],
+    "energizing": [80, 90],
+    "ascending": 100,
+}
+
+
+class TestTempo:
+    def test_quiet_returns_fixed_bpm(self):
+        fsm = _make_fsm()
+        assert fsm.state == State.QUIET
+        assert fsm.tempo(_TEMPO_CFG) == 50
+
+    def test_seeking_at_zero_bucket(self):
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        assert fsm.state == State.SEEKING
+        # bucket starts at entry_seed=0, so fraction ~0 → lo end
+        assert fsm.tempo(_TEMPO_CFG) == pytest.approx(60.0, abs=0.5)
+
+    def test_seeking_at_full_bucket(self):
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        # Fill bucket to full_at=10
+        _tick_for(fsm, _snap(engaged={0}), 10.0)
+        assert fsm.state == State.SEEKING
+        assert fsm.tempo(_TEMPO_CFG) == pytest.approx(70.0, abs=0.5)
+
+    def test_seeking_mid_bucket_interpolates(self):
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        # Fill to ~5 of 10 → 50% → lerp(60,70,0.5) = 65
+        _tick_for(fsm, _snap(engaged={0}), 5.0)
+        assert fsm.state == State.SEEKING
+        assert fsm.tempo(_TEMPO_CFG) == pytest.approx(65.0, abs=1.0)
+
+    def test_ascending_returns_fixed_bpm(self):
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        _tick_for(fsm, _snap(engaged={0, 1}, group_members={0, 1}), 11.0)
+        _tick_for(fsm, _snap(engaged={0, 1, 2}, group_members={0, 1, 2}), 11.0)
+        full = _snap(engaged={0, 1, 2, 3}, group_members={0, 1, 2, 3})
+        _tick_for(fsm, full, 7.0)
+        assert fsm.state == State.ASCENDING
+        assert fsm.tempo(_TEMPO_CFG) == 100
+
+    def test_aligning_tempo(self):
+        # After navigation: bucket ≈ 6.0 (entry_seed=5 + ~1s post-transition fill).
+        # fraction ≈ 0.6 → lerp(70, 80, 0.6) = 76.
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        _tick_for(fsm, _snap(engaged={0, 1}, group_members={0, 1}), 11.0)
+        assert fsm.state == State.ALIGNING
+        assert fsm.tempo(_TEMPO_CFG) == pytest.approx(76.0, abs=1.5)
+
+    def test_energizing_tempo(self):
+        # After navigation, bucket is full (5/5). Drain with pair snap (group<3)
+        # for 4s at drain_rate=0.5/s → bucket=3.0, fraction=0.6 → lerp(80,90,0.6)=86.
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        _tick_for(fsm, _snap(engaged={0, 1}, group_members={0, 1}), 11.0)
+        _tick_for(fsm, _snap(engaged={0, 1, 2}, group_members={0, 1, 2}), 11.0)
+        assert fsm.state == State.ENERGIZING
+        # Drain to a known mid-bucket level
+        _tick_for(fsm, _snap(engaged={0, 1}, group_members={0, 1}), 4.0)
+        assert fsm.state == State.ENERGIZING
+        assert fsm.tempo(_TEMPO_CFG) == pytest.approx(86.0, abs=1.0)
+
+    def test_tempo_changes_after_transition(self):
+        fsm = _make_fsm()
+        assert fsm.tempo(_TEMPO_CFG) == 50  # QUIET
+        fsm.tick(_snap(engaged={0}), 0.1)
+        assert fsm.state == State.SEEKING
+        # Now in SEEKING range, not QUIET
+        bpm = fsm.tempo(_TEMPO_CFG)
+        assert 60 <= bpm <= 70
+
+
+class TestBucketFraction:
+    def test_quiet_fraction_is_zero(self):
+        fsm = _make_fsm()
+        assert fsm.bucket_fraction == 0.0
+
+    def test_seeking_fraction_at_half(self):
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        _tick_for(fsm, _snap(engaged={0}), 5.0)
+        assert fsm.state == State.SEEKING
+        assert fsm.bucket_fraction == pytest.approx(0.5, abs=0.05)
+
+    def test_aligning_fraction(self):
+        # After navigation: bucket ≈ 6.0 (entry_seed=5 + ~1s fill), fraction ≈ 0.6
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        _tick_for(fsm, _snap(engaged={0, 1}, group_members={0, 1}), 11.0)
+        assert fsm.state == State.ALIGNING
+        assert fsm.bucket_fraction == pytest.approx(0.6, abs=0.05)
+
+    def test_energizing_fraction(self):
+        # After navigation, bucket full (5/5). Drain with pair snap for 4s
+        # at 0.5/s → bucket=3.0, fraction=0.6
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        _tick_for(fsm, _snap(engaged={0, 1}, group_members={0, 1}), 11.0)
+        _tick_for(fsm, _snap(engaged={0, 1, 2}, group_members={0, 1, 2}), 11.0)
+        assert fsm.state == State.ENERGIZING
+        _tick_for(fsm, _snap(engaged={0, 1}, group_members={0, 1}), 4.0)
+        assert fsm.state == State.ENERGIZING
+        assert fsm.bucket_fraction == pytest.approx(0.6, abs=0.05)
+
+    def test_ascending_fraction_is_zero(self):
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        _tick_for(fsm, _snap(engaged={0, 1}, group_members={0, 1}), 11.0)
+        _tick_for(fsm, _snap(engaged={0, 1, 2}, group_members={0, 1, 2}), 11.0)
+        full = _snap(engaged={0, 1, 2, 3}, group_members={0, 1, 2, 3})
+        _tick_for(fsm, full, 7.0)
+        assert fsm.state == State.ASCENDING
+        assert fsm.bucket_fraction == 0.0
+
+    def test_seeking_fraction_clamped_at_one(self):
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        _tick_for(fsm, _snap(engaged={0}), 15.0)
+        assert fsm.state == State.SEEKING
+        assert fsm.bucket_fraction == pytest.approx(1.0, abs=0.01)

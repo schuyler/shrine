@@ -19,7 +19,7 @@ from leds.state_machine import State
 # ---------------------------------------------------------------------------
 # These imports will fail (ImportError) until the green phase.
 # ---------------------------------------------------------------------------
-from leds.conductor_config import validate_state_mappings  # noqa: E402
+from leds.conductor_config import validate_state_mappings, validate_tempo_config  # noqa: E402
 from leds.conductor import _get_mappings, _set_mappings, _ConfigReloadHandler  # noqa: E402
 
 
@@ -706,3 +706,136 @@ class TestConfigReloadHandlerDebounce:
         assert len(reload_call_count) == 0, (
             "Events for other files must not trigger reload"
         )
+
+
+# ---------------------------------------------------------------------------
+# Helpers for validate_tempo_config
+# ---------------------------------------------------------------------------
+
+def _all_states_tempo() -> dict:
+    """Return a tempo dict with a valid entry for every State member."""
+    return {s.name.lower(): 60 for s in State}
+
+
+# ---------------------------------------------------------------------------
+# validate_tempo_config — valid input
+# ---------------------------------------------------------------------------
+
+class TestValidateTempoConfigValid:
+    def test_scalar_values_accepted(self):
+        config = {"tempo": _all_states_tempo()}
+        result = validate_tempo_config(config)
+        assert isinstance(result, dict)
+        for s in State:
+            assert s.name.lower() in result
+
+    def test_range_values_accepted(self):
+        tempo = {s.name.lower(): [60, 80] for s in State}
+        config = {"tempo": tempo}
+        result = validate_tempo_config(config)
+        for s in State:
+            assert result[s.name.lower()] == [60, 80]
+
+    def test_mixed_scalar_and_range_accepted(self):
+        tempo = _all_states_tempo()
+        tempo["seeking"] = [60, 70]
+        config = {"tempo": tempo}
+        result = validate_tempo_config(config)
+        assert result["seeking"] == [60, 70]
+
+    def test_returns_copy_not_original(self):
+        tempo = _all_states_tempo()
+        config = {"tempo": tempo}
+        result = validate_tempo_config(config)
+        assert result is not tempo
+
+
+# ---------------------------------------------------------------------------
+# validate_tempo_config — missing / wrong type
+# ---------------------------------------------------------------------------
+
+class TestValidateTempoConfigMissing:
+    def test_missing_tempo_section_raises(self):
+        with pytest.raises(ValueError, match="tempo"):
+            validate_tempo_config({})
+
+    def test_tempo_not_a_dict_raises(self):
+        with pytest.raises(ValueError, match="dict"):
+            validate_tempo_config({"tempo": "not a dict"})
+
+    def test_missing_state_key_raises(self):
+        tempo = _all_states_tempo()
+        del tempo[list(State)[-1].name.lower()]
+        with pytest.raises(ValueError, match="missing"):
+            validate_tempo_config({"tempo": tempo})
+
+    def test_error_message_names_missing_state(self):
+        missing = list(State)[-1].name.lower()
+        tempo = _all_states_tempo()
+        del tempo[missing]
+        with pytest.raises(ValueError, match=missing):
+            validate_tempo_config({"tempo": tempo})
+
+
+# ---------------------------------------------------------------------------
+# validate_tempo_config — bad value types
+# ---------------------------------------------------------------------------
+
+class TestValidateTempoConfigBadTypes:
+    def test_string_value_raises(self):
+        tempo = _all_states_tempo()
+        tempo["quiet"] = "fast"
+        with pytest.raises(ValueError):
+            validate_tempo_config({"tempo": tempo})
+
+    def test_none_value_raises(self):
+        tempo = _all_states_tempo()
+        tempo["quiet"] = None
+        with pytest.raises(ValueError):
+            validate_tempo_config({"tempo": tempo})
+
+    def test_list_with_one_element_raises(self):
+        tempo = _all_states_tempo()
+        tempo["seeking"] = [60]
+        with pytest.raises(ValueError, match="2 elements"):
+            validate_tempo_config({"tempo": tempo})
+
+    def test_list_with_three_elements_raises(self):
+        tempo = _all_states_tempo()
+        tempo["seeking"] = [60, 70, 80]
+        with pytest.raises(ValueError, match="2 elements"):
+            validate_tempo_config({"tempo": tempo})
+
+    def test_non_numeric_list_elements_raises(self):
+        tempo = _all_states_tempo()
+        tempo["seeking"] = ["fast", "slow"]
+        with pytest.raises(ValueError, match="numeric"):
+            validate_tempo_config({"tempo": tempo})
+
+    def test_inverted_range_raises(self):
+        tempo = _all_states_tempo()
+        tempo["seeking"] = [90, 60]
+        with pytest.raises(ValueError, match="lo <= hi"):
+            validate_tempo_config({"tempo": tempo})
+
+
+# ---------------------------------------------------------------------------
+# validate_tempo_config — extra keys
+# ---------------------------------------------------------------------------
+
+class TestValidateTempoConfigExtraKeys:
+    def test_extra_key_does_not_raise(self):
+        tempo = _all_states_tempo()
+        tempo["bogus_state"] = 42
+        config = {"tempo": tempo}
+        result = validate_tempo_config(config)
+        assert result is not None
+
+    def test_extra_key_logs_warning(self, caplog):
+        import logging
+        tempo = _all_states_tempo()
+        tempo["typo_state"] = 42
+        config = {"tempo": tempo}
+        with caplog.at_level(logging.WARNING):
+            validate_tempo_config(config)
+        assert "typo_state" in " ".join(caplog.messages)

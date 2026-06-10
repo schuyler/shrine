@@ -112,6 +112,11 @@ def validate_tempo_config(config: dict) -> dict:
                 raise ValueError(
                     f"'tempo[{key!r}]' range elements must be numeric"
                 )
+            if val[0] > val[1]:
+                raise ValueError(
+                    f"'tempo[{key!r}]' range [lo, hi] must satisfy lo <= hi, "
+                    f"got [{val[0]}, {val[1]}]"
+                )
         elif not isinstance(val, (int, float)):
             raise ValueError(
                 f"'tempo[{key!r}]' must be a number or [lo, hi] list, "
