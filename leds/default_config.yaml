@@ -3,16 +3,16 @@ osc_listen_port: 9000
 wled_targets:
   - host: "wled-a.local"
     pad: 0
-    color: [255, 40, 0]
+    color: [217, 24, 40]
   - host: "wled-b.local"
     pad: 1
-    color: [0, 200, 255]
+    color: [2, 136, 166]
   - host: "wled-c.local"
     pad: 2
-    color: [180, 0, 255]
+    color: [217, 207, 74]
   - host: "wled-d.local"
     pad: 3
-    color: [40, 255, 0]
+    color: [242, 174, 48]
 wled_port: 80
 wled_timeout: 1.0
 update_rate_hz: 30

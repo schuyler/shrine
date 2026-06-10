@@ -2,3 +2,9 @@ default:
   idle: [0, 0, 255]
   warm: [255, 180, 0]
   accent: [200, 0, 200]
+
+ascending:
+  idle: [168, 191, 187]
+  warm: [242, 220, 180]
+  unison: [168, 191, 187]
+  accent: [255, 255, 240]

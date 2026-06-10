@@ -8,7 +8,7 @@ from dataclasses import dataclass
 class SegmentParams:
     col: list[list[int]]  # up to 3 RGB triples
     bri: int              # 0-255
-    fx: int = 0
+    fx: int | str = 0
     sx: int = 128
     ix: int = 128
     pal: int = 0
@@ -48,3 +48,6 @@ def list_programs() -> list[str]:
 # Import built-in programs to trigger registration.
 from leds.programs import breathe as _breathe  # noqa: E402, F401
 from leds.programs import chase as _chase  # noqa: E402, F401
+from leds.programs import pulse as _pulse  # noqa: E402, F401
+from leds.programs import converge as _converge  # noqa: E402, F401
+from leds.programs import bloom as _bloom  # noqa: E402, F401

@@ -20,20 +20,19 @@ from leds.state_machine import GroupChangedEvent, State, StateMachine, StateChan
 logger = logging.getLogger(__name__)
 
 # Program and palette names to send to the LED stack on each state transition.
-# Values here are placeholders to reconcile with Lighting_Architecture.
 _STATE_PROGRAMS: dict[State, str] = {
     State.QUIET: "breathe",
-    State.SEEKING: "chase",
-    State.ALIGNING: "breathe",
-    State.ENERGIZING: "breathe",
-    State.ASCENDING: "breathe",
+    State.SEEKING: "pulse",
+    State.ALIGNING: "converge",
+    State.ENERGIZING: "converge",
+    State.ASCENDING: "bloom",
 }
 _STATE_PALETTES: dict[State, str] = {
     State.QUIET: "default",
     State.SEEKING: "default",
     State.ALIGNING: "default",
     State.ENERGIZING: "default",
-    State.ASCENDING: "default",
+    State.ASCENDING: "ascending",
 }
 
 

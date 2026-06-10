@@ -10,6 +10,7 @@ class PadSnapshot:
     heartbeat: float  # Hz, 0 = none
     flux: float       # 0-1
     signature_color: list[int] | None = None
+    group: frozenset = frozenset()
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,7 @@ class PadState:
                     heartbeat=self._heartbeat[i],
                     flux=self._flux[i],
                     signature_color=self._signature_colors.get(i),
+                    group=self._group,
                 )
                 for i in range(len(self._pads))
             ]

@@ -2,7 +2,7 @@
 
 from leds.programs import Program, SegmentParams, register
 
-_WLED_CHASE_FX = 28
+_WLED_CHASE_FX = "Chase"
 
 # Heartbeat Hz → WLED sx mapping.  Empirical starting point; needs tuning.
 _HB_LO = 0.5   # Hz

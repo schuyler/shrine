@@ -4,14 +4,15 @@ from leds.programs import Program, SegmentParams, get_program, list_programs, re
 from leds.pad_state import PadSnapshot
 from leds.clock import ClockPhase
 from leds.palettes import Palette
+from leds.color import lerp_hsv, group_centroid
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_pad(cap=0.0, heartbeat=0.0, flux=0.0, signature_color=None):
-    return PadSnapshot(cap=cap, heartbeat=heartbeat, flux=flux, signature_color=signature_color)
+def make_pad(cap=0.0, heartbeat=0.0, flux=0.0, signature_color=None, group=frozenset()):
+    return PadSnapshot(cap=cap, heartbeat=heartbeat, flux=flux, signature_color=signature_color, group=group)
 
 
 def make_palette():
@@ -318,12 +319,12 @@ class TestChaseProgram:
         segments, _ = prog.render(pads, make_palette(), make_clock(), {})
         assert len(segments) == 4
 
-    def test_chase_active_pad_produces_fx_28(self):
-        """Active pad (heartbeat > 0) uses WLED Chase effect fx=28."""
+    def test_chase_active_pad_produces_fx_chase(self):
+        """Active pad (heartbeat > 0) uses WLED Chase effect fx='Chase'."""
         prog = get_program("chase")
         pads = [make_pad(heartbeat=1.5)]
         segments, _ = prog.render(pads, make_palette(), make_clock(), {})
-        assert segments[0].fx == 28
+        assert segments[0].fx == "Chase"
 
     def test_chase_active_pad_sx_maps_linearly(self):
         """heartbeat=1.75 Hz (midpoint of [0.5, 3.0]) → sx=130 (midpoint of [60, 200])."""
@@ -384,7 +385,7 @@ class TestChaseProgram:
         assert segments[0].col == [palette.get("idle")]
 
     def test_chase_mixed_pads_produce_different_fx(self):
-        """Active and inactive pads in same render call produce fx=28 and fx=0 respectively."""
+        """Active and inactive pads in same render call produce fx='Chase' and fx=0 respectively."""
         prog = get_program("chase")
         palette = make_palette()
         pads = [
@@ -392,7 +393,7 @@ class TestChaseProgram:
             make_pad(heartbeat=0.0),   # inactive
         ]
         segments, _ = prog.render(pads, palette, make_clock(), {})
-        assert segments[0].fx == 28
+        assert segments[0].fx == "Chase"
         assert segments[1].fx == 0
 
     def test_chase_sx_clamp_low_heartbeat(self):
@@ -421,3 +422,277 @@ class TestChaseProgram:
         # At cap=0, signature_color pad uses sig_color, non-signature uses palette idle
         assert segs_with[0].col == [sig_color]
         assert segs_without[0].col == [palette.get("idle")]
+
+
+# ---------------------------------------------------------------------------
+# Pulse program
+# ---------------------------------------------------------------------------
+
+class TestPulseProgram:
+    def test_pulse_is_registered(self):
+        assert "pulse" in list_programs()
+
+    def test_pulse_name(self):
+        prog = get_program("pulse")
+        assert prog.name == "pulse"
+
+    def test_pulse_render_returns_one_segment_per_pad(self):
+        prog = get_program("pulse")
+        pads = [make_pad() for _ in range(4)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert len(segments) == 4
+
+    def test_pulse_active_pad_uses_comet_effect(self):
+        """Active pad (cap above threshold) uses WLED Comet effect."""
+        prog = get_program("pulse")
+        pads = [make_pad(cap=0.5)]
+        segs, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segs[0].fx == "Comet"
+
+    def test_pulse_inactive_pad_uses_solid(self):
+        """Inactive pad (cap=0) uses default fx=0 (Solid)."""
+        prog = get_program("pulse")
+        pads = [make_pad(cap=0.0)]
+        segs, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segs[0].fx == 0
+
+    def test_pulse_inactive_pad_dim(self):
+        """Inactive pad has low brightness."""
+        prog = get_program("pulse")
+        pads = [make_pad(cap=0.0)]
+        segs, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segs[0].bri == 20
+
+    def test_pulse_active_pad_brightness_scales_with_cap(self):
+        """Higher cap produces higher brightness on active pads."""
+        prog = get_program("pulse")
+        palette = make_palette()
+        clock = make_clock()
+        segs_lo, _ = prog.render([make_pad(cap=0.2)], palette, clock, {})
+        segs_hi, _ = prog.render([make_pad(cap=0.9)], palette, clock, {})
+        assert segs_hi[0].bri > segs_lo[0].bri
+
+    def test_pulse_active_pad_brightness_floor(self):
+        """Active pad has bri >= 80."""
+        prog = get_program("pulse")
+        pads = [make_pad(cap=0.1)]
+        segs, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segs[0].bri >= 80
+
+    def test_pulse_uses_signature_color(self):
+        """Inactive pad uses signature_color as base."""
+        prog = get_program("pulse")
+        sig_color = [217, 24, 40]
+        pads = [make_pad(cap=0.0, signature_color=sig_color)]
+        segs, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segs[0].col == [sig_color]
+
+    def test_pulse_falls_back_to_palette_idle(self):
+        """Without signature_color, uses palette idle."""
+        prog = get_program("pulse")
+        palette = make_palette()
+        pads = [make_pad(cap=0.0, signature_color=None)]
+        segs, _ = prog.render(pads, palette, make_clock(), {})
+        assert segs[0].col == [palette.get("idle")]
+
+    def test_pulse_mixed_active_inactive(self):
+        """Active and inactive pads in same render produce different fx."""
+        prog = get_program("pulse")
+        pads = [make_pad(cap=0.5), make_pad(cap=0.0)]
+        segs, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segs[0].fx == "Comet"
+        assert segs[1].fx == 0
+
+    def test_pulse_returns_empty_state(self):
+        prog = get_program("pulse")
+        pads = [make_pad() for _ in range(4)]
+        _, state = prog.render(pads, make_palette(), make_clock(), {})
+        assert state == {}
+
+
+# ---------------------------------------------------------------------------
+# Converge program
+# ---------------------------------------------------------------------------
+
+class TestConvergeProgram:
+    def test_converge_is_registered(self):
+        assert "converge" in list_programs()
+
+    def test_converge_name(self):
+        prog = get_program("converge")
+        assert prog.name == "converge"
+
+    def test_converge_render_returns_one_segment_per_pad(self):
+        prog = get_program("converge")
+        pads = [make_pad() for _ in range(4)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert len(segments) == 4
+
+    def test_converge_no_group_uses_signature_colors(self):
+        """Pads with empty group render like breathe — base color is signature_color."""
+        prog = get_program("converge")
+        palette = make_palette()
+        sig = [217, 24, 40]
+        # Empty group → not in group branch, breathe-like behavior
+        pads = [make_pad(cap=0.0, signature_color=sig, group=frozenset())]
+        segs, _ = prog.render(pads, palette, make_clock(), {})
+        # At cap=0: lerp_hsv(sig, warm, 0) == sig
+        assert segs[0].col == [sig]
+
+    def test_converge_group_of_two_blends_colors(self):
+        """Two pads in a group produce colors closer to each other than their originals."""
+        prog = get_program("converge")
+        palette = make_palette()
+        sig0 = [217, 24, 40]    # red
+        sig1 = [2, 136, 166]    # teal
+        group = frozenset({0, 1})
+        pads = [
+            make_pad(cap=0.0, signature_color=sig0, group=group),
+            make_pad(cap=0.0, signature_color=sig1, group=group),
+        ]
+        segs, _ = prog.render(pads, palette, make_clock(), {})
+        # centroid of [sig0, sig1]; blend_t=0.3 for group of 2
+        centroid = group_centroid([sig0, sig1])
+        expected0 = lerp_hsv(sig0, centroid, 0.3)
+        expected1 = lerp_hsv(sig1, centroid, 0.3)
+        assert segs[0].col == [expected0]
+        assert segs[1].col == [expected1]
+
+    def test_converge_larger_group_blends_more(self):
+        """Group of 3 blends more strongly than group of 2."""
+        prog = get_program("converge")
+        palette = make_palette()
+        sig0 = [217, 24, 40]
+        sig1 = [2, 136, 166]
+        sig2 = [217, 207, 74]
+
+        group2 = frozenset({0, 1})
+        pads2 = [
+            make_pad(cap=0.0, signature_color=sig0, group=group2),
+            make_pad(cap=0.0, signature_color=sig1, group=group2),
+            make_pad(cap=0.0, signature_color=sig2),
+        ]
+        segs2, _ = prog.render(pads2, palette, make_clock(), {})
+
+        group3 = frozenset({0, 1, 2})
+        pads3 = [
+            make_pad(cap=0.0, signature_color=sig0, group=group3),
+            make_pad(cap=0.0, signature_color=sig1, group=group3),
+            make_pad(cap=0.0, signature_color=sig2, group=group3),
+        ]
+        segs3, _ = prog.render(pads3, palette, make_clock(), {})
+
+        # For pad 0, group of 3 uses blend_t=0.6 vs group of 2 uses blend_t=0.3.
+        # Centroid differs too, but the blend factor is larger for group of 3.
+        # We verify that pad0's output color differs between the two group sizes.
+        assert segs2[0].col != segs3[0].col
+
+    def test_converge_grouped_pad_higher_brightness_floor(self):
+        """A pad in the group at cap=0 has bri >= 50."""
+        prog = get_program("converge")
+        palette = make_palette()
+        sig0 = [217, 24, 40]
+        sig1 = [2, 136, 166]
+        group = frozenset({0, 1})
+        pads = [
+            make_pad(cap=0.0, signature_color=sig0, group=group),
+            make_pad(cap=0.0, signature_color=sig1, group=group),
+        ]
+        segs, _ = prog.render(pads, palette, make_clock(), {})
+        assert segs[0].bri >= 50
+
+    def test_converge_ungrouped_pad_lower_brightness_floor(self):
+        """A pad not in the group at cap=0 has bri == 20."""
+        prog = get_program("converge")
+        palette = make_palette()
+        # pad index 0 is in group {1}, so pad 0 is not in the group
+        sig0 = [217, 24, 40]
+        sig1 = [2, 136, 166]
+        group = frozenset({1})  # only pad index 1 is in the group
+        pads = [
+            make_pad(cap=0.0, signature_color=sig0, group=group),
+            make_pad(cap=0.0, signature_color=sig1, group=group),
+        ]
+        segs, _ = prog.render(pads, palette, make_clock(), {})
+        assert segs[0].bri == 20
+
+    def test_converge_returns_empty_state(self):
+        prog = get_program("converge")
+        pads = [make_pad() for _ in range(4)]
+        _, state = prog.render(pads, make_palette(), make_clock(), {})
+        assert state == {}
+
+
+# ---------------------------------------------------------------------------
+# Bloom program
+# ---------------------------------------------------------------------------
+
+class TestBloomProgram:
+    def test_bloom_is_registered(self):
+        assert "bloom" in list_programs()
+
+    def test_bloom_name(self):
+        prog = get_program("bloom")
+        assert prog.name == "bloom"
+
+    def test_bloom_render_returns_one_segment_per_pad(self):
+        prog = get_program("bloom")
+        pads = [make_pad() for _ in range(4)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert len(segments) == 4
+
+    def test_bloom_all_pads_same_color(self):
+        """All pads use the same unison color regardless of signature_color."""
+        prog = get_program("bloom")
+        palette = make_palette()
+        pads = [
+            make_pad(signature_color=[217, 24, 40]),
+            make_pad(signature_color=[2, 136, 166]),
+            make_pad(signature_color=None),
+            make_pad(signature_color=[242, 174, 48]),
+        ]
+        segments, _ = prog.render(pads, palette, make_clock(), {})
+        colors = [seg.col for seg in segments]
+        assert all(c == colors[0] for c in colors)
+
+    def test_bloom_uses_palette_unison(self):
+        """With ascending palette, bloom uses palette unison color."""
+        prog = get_program("bloom")
+        unison = [168, 191, 187]
+        palette = Palette("ascending", {"idle": unison, "warm": [242, 220, 180], "unison": unison, "accent": [255, 255, 240]})
+        pads = [make_pad()]
+        segs, _ = prog.render(pads, palette, make_clock(), {})
+        assert segs[0].col == [unison]
+
+    def test_bloom_uses_default_unison_without_palette_key(self):
+        """Without a unison key in palette, bloom falls back to [168, 191, 187]."""
+        prog = get_program("bloom")
+        palette = make_palette()  # default palette has no 'unison' key
+        pads = [make_pad()]
+        segs, _ = prog.render(pads, palette, make_clock(), {})
+        assert segs[0].col == [[168, 191, 187]]
+
+    def test_bloom_high_brightness(self):
+        """All segments have bri >= 200."""
+        prog = get_program("bloom")
+        pads = [make_pad() for _ in range(4)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        for seg in segments:
+            assert seg.bri >= 200
+
+    def test_bloom_brightness_varies_with_bar_phase(self):
+        """Different bar phases produce different brightness."""
+        prog = get_program("bloom")
+        palette = make_palette()
+        pads = [make_pad()]
+        segs_0, _ = prog.render(pads, palette, ClockPhase(beat=0.0, bar=0.0, bpm=120.0), {})
+        segs_25, _ = prog.render(pads, palette, ClockPhase(beat=0.0, bar=0.25, bpm=120.0), {})
+        # bar=0.0: sin(0)=0 → pulse=0.5 → bri=228
+        # bar=0.25: sin(pi/2)=1 → pulse=1.0 → bri=255
+        assert segs_0[0].bri != segs_25[0].bri
+
+    def test_bloom_returns_empty_state(self):
+        prog = get_program("bloom")
+        pads = [make_pad() for _ in range(4)]
+        _, state = prog.render(pads, make_palette(), make_clock(), {})
+        assert state == {}

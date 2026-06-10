@@ -380,6 +380,42 @@ class TestPadSnapshotSignatureColor:
 
 
 # ---------------------------------------------------------------------------
+# PadSnapshot.group
+# ---------------------------------------------------------------------------
+
+class TestPadSnapshotGroup:
+
+    def test_default_group_is_empty_frozenset(self):
+        snap = PadSnapshot(cap=0.0, heartbeat=0.0, flux=0.0)
+        assert snap.group == frozenset()
+
+    def test_explicit_group_stored(self):
+        group = frozenset({0, 1, 2})
+        snap = PadSnapshot(cap=0.0, heartbeat=0.0, flux=0.0, group=group)
+        assert snap.group == frozenset({0, 1, 2})
+
+    def test_group_included_in_snapshot_after_set_group(self):
+        state = PadState([0, 1, 2, 3])
+        state.set_group(frozenset({1, 3}))
+        snapshots, *_ = state.snapshot()
+        for snap in snapshots:
+            assert snap.group == frozenset({1, 3})
+
+    def test_snapshot_group_empty_by_default(self):
+        state = PadState([0, 1, 2, 3])
+        snapshots, *_ = state.snapshot()
+        for snap in snapshots:
+            assert snap.group == frozenset()
+
+    def test_snapshot_group_updates_after_set_group(self):
+        state = PadState([0, 1, 2, 3])
+        state.set_group(frozenset({0, 2}))
+        snapshots, *_ = state.snapshot()
+        assert snapshots[0].group == frozenset({0, 2})
+        assert snapshots[2].group == frozenset({0, 2})
+
+
+# ---------------------------------------------------------------------------
 # PadState.set_signature_colors
 # ---------------------------------------------------------------------------
 

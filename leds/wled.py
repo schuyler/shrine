@@ -16,15 +16,41 @@ class WledClient:
         self.timeout = timeout
         self._failed = False
         self._session = requests.Session()
+        self._effects: dict[str, int] | None = None
+        self._warned_fx: set[str] = set()
+
+    def _resolve_effects(self) -> None:
+        url = f"http://{self.host}:{self.port}/json"
+        try:
+            resp = self._session.get(url, timeout=self.timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            self._effects = {name.lower(): idx for idx, name in enumerate(data["effects"])}
+        except Exception as exc:
+            logger.warning("WLED effect resolution failed: %s: %s", url, exc)
+            self._effects = {}
+
+    def _resolve_fx(self, fx: int | str) -> int:
+        if isinstance(fx, int):
+            return fx
+        key = fx.lower()
+        if key in self._effects:
+            return self._effects[key]
+        if key not in self._warned_fx:
+            logger.warning("Unknown WLED effect name %r, falling back to fx=0 (Solid)", fx)
+            self._warned_fx.add(key)
+        return 0
 
     def send(self, segments) -> float | None:
+        if self._effects is None:
+            self._resolve_effects()
         url = f"http://{self.host}:{self.port}/json/state"
         body = {
             "seg": [
                 {
                     "col": seg.col,
                     "bri": seg.bri,
-                    "fx": seg.fx,
+                    "fx": self._resolve_fx(seg.fx),
                     "sx": seg.sx,
                     "ix": seg.ix,
                     "pal": seg.pal,
