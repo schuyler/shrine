@@ -1,4 +1,6 @@
 #!/bin/sh
+set -e
+
 rsync -avz \
     --exclude='.venv/' \
     --exclude='__pycache__/' \
@@ -8,5 +10,11 @@ rsync -avz \
     --exclude='.envrc' \
     --exclude='nvs/*.csv' \
     --exclude='wled/*.bin' \
-    --exclude='pd/' \
+    --exclude='pd/main.pd' \   # main.pd is GUI-edited on corazon; never overwrite
+
     ./ corazon.local:shrine/
+
+echo
+echo "Restarting shrine services..."
+ssh corazon.local sudo systemctl restart shrine-pd shrine-conductor shrine-leds
+echo "Done."

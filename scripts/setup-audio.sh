@@ -104,7 +104,29 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Section 3: systemd units
+# Section 3: Journal log retention
+# ---------------------------------------------------------------------------
+configure_journald() {
+    info "=== Journal log retention ==="
+
+    local src="${SHRINE_SYSTEMD_DIR}/journald-shrine.conf"
+    local dst="/etc/systemd/journald.conf.d/shrine.conf"
+    if [[ ! -f "${src}" ]]; then
+        warn "${src} not found — skipping"
+        return
+    fi
+    mkdir -p "$(dirname "${dst}")"
+    if [[ -f "${dst}" ]] && diff -q "${src}" "${dst}" &>/dev/null; then
+        ok "${dst} already up to date"
+    else
+        install "Installing ${dst}"
+        cp "${src}" "${dst}"
+        systemctl restart systemd-journald
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Section 4: systemd units
 # ---------------------------------------------------------------------------
 install_systemd_units() {
     if [[ "${INSTALL_SERVICES}" != "true" ]]; then
@@ -214,6 +236,16 @@ check_status() {
     fi
     echo
 
+    echo "--- Journal retention ---"
+    local journald_dst="/etc/systemd/journald.conf.d/shrine.conf"
+    if [[ -f "${journald_dst}" ]]; then
+        echo "  ${journald_dst}: EXISTS"
+        grep MaxRetentionSec "${journald_dst}" || true
+    else
+        echo "  ${journald_dst}: MISSING"
+    fi
+    echo
+
     echo "--- systemd units ---"
     local units=(shrine-pd shrine-conductor shrine-leds)
     for unit in "${units[@]}"; do
@@ -259,6 +291,8 @@ main() {
     install_packages
     echo
     configure_audio_group
+    echo
+    configure_journald
     echo
     install_systemd_units
     echo
