@@ -1,6 +1,6 @@
 #N canvas 0 0 900 600 12;
 #X text 20 16 main.pd -- top-level Shrine sound engine. Loads OSC input + drones + master.;
-#X text 20 34 Melodic SoundFont layer (sfont-host + melodic-voice) is added once ELSE/Pd 0.56 is available.;
+#X text 20 34 Melodic layer (melodic-voice note generators -> texture renderers) is added once ELSE/Pd 0.56 is available.;
 #X obj 40 90 osc-receive;
 #X obj 40 470 master;
 #X obj 600 90 loadbang;

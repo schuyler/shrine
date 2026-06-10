@@ -9,9 +9,11 @@ The engine is intentionally **two engines split by layer**:
 
 - **Additive drones** — four presence-drones (one per pad), cap-driven amplitude
   and detune. Continuous, per-partial, body-coupled. (`drone.pd`)
-- **SoundFont melodic voices** — six connection-driven voices (one per GSR pair),
-  note/rhythm/volume only, played through `[sfont~]`. (`melodic-voice.pd` +
-  `sfont-host.pd`)
+- **SoundFont melodic voices** — connection-driven note *generators* (one per GSR
+  pair), note/rhythm/volume only. Each `melodic-voice` is bang-triggered and emits
+  a stream of `pitch velocity` pairs into a **texture renderer**'s `Note` inlet;
+  the texture owns its own `[sfont~]` + effects (see `texture-test.pd`).
+  (`melodic-voice.pd`)
 
 ## The OSC contract (real, as wired here)
 
@@ -84,15 +86,16 @@ two patches binding 57120 would contend, not both receive). It publishes:
 | `clock.pd` | verified (load) | global pulse: `beat`, `bar`, `beat-ms` (default 60 BPM) |
 | `mode-table.pd` | **verified** | fills `mode-notes` array (major pentatonic, MIDI 36–93) |
 | `restless.pd` | **verified** | fluctuation proxy 0–1 (replaces absent gsr-stdev) |
-| `melodic-voice.pd` | **verified** (note-gen) | per-pair walk → MIDI to `[s voice-midi]` |
+| `melodic-voice.pd` | unverified (reworked) | bang-triggered per-pair walk → `pitch velocity` pairs out an outlet → texture `Note` inlet |
 | `heartbeat.pd` | verified | STUB: constant 60 BPM + 0 detune (per build plan) |
 | `monitor.pd` | verified (load) | DEV-ONLY bus printer (do not load in production) |
 | `main.pd` | verified (load) | top level: OSC + 4 drones + master |
-| `sfont-host.pd` | **DRAFT** | `[sfont~]` host — needs ELSE + on-target verification |
+| `texture-test.pd` | unverified (ELSE) | per-voice instruments (each embeds its own `[else/sfont~]` + FX), driven by a `Note` inlet expecting `pitch velocity` pairs |
 
 "verified" = exercised headless under Pd 0.54 with the real OSC format / signal
 measurement (see Testing). "verified (load)" = loads clean, components verified
-individually. "DRAFT" = authored but not run (depends on ELSE `[sfont~]`).
+individually. "unverified" = authored/reworked but not yet re-run on target
+(several depend on the ELSE `[sfont~]` available only on Pd 0.56+).
 
 `main.pd` currently wires the **additive drone slice** (OSC → cap → 4 drones →
 master), which is fully verified. The SoundFont melodic layer is the next wiring
@@ -152,14 +155,16 @@ uv run python test/send_nodes.py                        # sends /shrine/node/*
 
 Mapping to `Pd_Build_Plan`'s phases:
 
-1. **Melodic layer (build-plan Phase 1/3):** drop a GM choir/organ `.sf2` into
-   `pd/samples/`, finish `sfont-host.pd` against the real `[sfont~]` message
-   syntax, instantiate six `melodic-voice` in `main.pd` (register index + channel
-   per pair via inlets), and verify on Pd 0.56 + ELSE.
-2. **Subdivision:** drive `melodic-voice` step rate from `restless-*` via the
-   subdivision ladder (per-bar commit + hysteresis). Currently steps once per beat.
-3. **Walk polish:** reflect at window edges instead of `[clip]`; add note-off
-   discipline so `[sfont~]` doesn't pile up stuck notes.
+1. **Melodic layer (build-plan Phase 1/3):** wire the note generators to the
+   texture renderers in `main.pd` — instantiate a `melodic-voice` per pair, feed
+   each one's outlet (`pitch velocity` pairs) into a texture's `Note` inlet
+   (textures own their own `[else/sfont~]` + FX, see `texture-test.pd`), and drive
+   each `melodic-voice` with a per-voice trigger (a `metro`, or a `cap-trigger`-derived
+   bang). Verify on Pd 0.56 + ELSE.
+2. **Subdivision:** drive each `melodic-voice`'s trigger rate from `restless-*` via
+   the subdivision ladder (per-bar commit + hysteresis), rather than a fixed metro.
+3. **Walk polish:** the walk already reflects at the window edges and sends a
+   note-off before each note-on; tune the leap/reverse weights against real play.
 4. **Drone detune wobble:** high-pass `cap-N` and feed the fluctuation into the
    drone partial detune (build-plan gotcha) — structure noted in `drone.pd`.
 5. **Heartbeat:** replace `heartbeat.pd` stub once the 1–3 Hz pulse signal is
