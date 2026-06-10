@@ -442,12 +442,12 @@ class TestPulseProgram:
         segments, _ = prog.render(pads, make_palette(), make_clock(), {})
         assert len(segments) == 4
 
-    def test_pulse_active_pad_uses_comet_effect(self):
-        """Active pad (cap above threshold) uses WLED Comet effect."""
+    def test_pulse_active_pad_uses_meteor_effect(self):
+        """Active pad (cap above threshold) uses WLED Meteor effect."""
         prog = get_program("pulse")
         pads = [make_pad(cap=0.5)]
         segs, _ = prog.render(pads, make_palette(), make_clock(), {})
-        assert segs[0].fx == "Comet"
+        assert segs[0].fx == "Meteor"
 
     def test_pulse_inactive_pad_uses_solid(self):
         """Inactive pad (cap=0) uses default fx=0 (Solid)."""
@@ -500,7 +500,7 @@ class TestPulseProgram:
         prog = get_program("pulse")
         pads = [make_pad(cap=0.5), make_pad(cap=0.0)]
         segs, _ = prog.render(pads, make_palette(), make_clock(), {})
-        assert segs[0].fx == "Comet"
+        assert segs[0].fx == "Meteor"
         assert segs[1].fx == 0
 
     def test_pulse_returns_empty_state(self):
@@ -539,8 +539,8 @@ class TestConvergeProgram:
         # At cap=0: lerp_hsv(sig, warm, 0) == sig
         assert segs[0].col == [sig]
 
-    def test_converge_group_of_two_blends_colors(self):
-        """Two pads in a group produce colors closer to each other than their originals."""
+    def test_converge_group_uses_colorwaves_with_signature_colors(self):
+        """Two pads in a group both receive colorwaves fx with both signature colors."""
         prog = get_program("converge")
         palette = make_palette()
         sig0 = [217, 24, 40]    # red
@@ -551,41 +551,28 @@ class TestConvergeProgram:
             make_pad(cap=0.0, signature_color=sig1, group=group),
         ]
         segs, _ = prog.render(pads, palette, make_clock(), {})
-        # centroid of [sig0, sig1]; blend_t=0.3 for group of 2
-        centroid = group_centroid([sig0, sig1])
-        expected0 = lerp_hsv(sig0, centroid, 0.3)
-        expected1 = lerp_hsv(sig1, centroid, 0.3)
-        assert segs[0].col == [expected0]
-        assert segs[1].col == [expected1]
+        assert segs[0].fx == "colorwaves"
+        assert segs[1].fx == "colorwaves"
+        assert segs[0].col == [sig0, sig1]
+        assert segs[1].col == [sig0, sig1]
 
-    def test_converge_larger_group_blends_more(self):
-        """Group of 3 blends more strongly than group of 2."""
+    def test_converge_group_of_three_uses_first_two_colors(self):
+        """Group of 3 passes first two signature colors to colorwaves."""
         prog = get_program("converge")
         palette = make_palette()
         sig0 = [217, 24, 40]
         sig1 = [2, 136, 166]
         sig2 = [217, 207, 74]
-
-        group2 = frozenset({0, 1})
-        pads2 = [
-            make_pad(cap=0.0, signature_color=sig0, group=group2),
-            make_pad(cap=0.0, signature_color=sig1, group=group2),
-            make_pad(cap=0.0, signature_color=sig2),
+        group = frozenset({0, 1, 2})
+        pads = [
+            make_pad(cap=0.0, signature_color=sig0, group=group),
+            make_pad(cap=0.0, signature_color=sig1, group=group),
+            make_pad(cap=0.0, signature_color=sig2, group=group),
         ]
-        segs2, _ = prog.render(pads2, palette, make_clock(), {})
-
-        group3 = frozenset({0, 1, 2})
-        pads3 = [
-            make_pad(cap=0.0, signature_color=sig0, group=group3),
-            make_pad(cap=0.0, signature_color=sig1, group=group3),
-            make_pad(cap=0.0, signature_color=sig2, group=group3),
-        ]
-        segs3, _ = prog.render(pads3, palette, make_clock(), {})
-
-        # For pad 0, group of 3 uses blend_t=0.6 vs group of 2 uses blend_t=0.3.
-        # Centroid differs too, but the blend factor is larger for group of 3.
-        # We verify that pad0's output color differs between the two group sizes.
-        assert segs2[0].col != segs3[0].col
+        segs, _ = prog.render(pads, palette, make_clock(), {})
+        for seg in segs:
+            assert seg.fx == "colorwaves"
+            assert seg.col == [sig0, sig1]
 
     def test_converge_grouped_pad_higher_brightness_floor(self):
         """A pad in the group at cap=0 has bri >= 50."""
