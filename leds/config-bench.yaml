@@ -1,0 +1,6 @@
+wled_targets:
+  - host: "wled-a.local"
+    pad: 0
+    color: [255, 40, 0]
+pads: [0]
+update_rate_hz: 10
