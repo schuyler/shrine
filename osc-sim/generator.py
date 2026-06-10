@@ -583,7 +583,9 @@ def main():
         description="OSC sensor data simulator for the Shrine sound engine."
     )
     parser.add_argument("--host", default="127.0.0.1", help="OSC target host")
-    parser.add_argument("--port", type=int, default=57120, help="OSC target port")
+    parser.add_argument("--port", type=int, default=9001,
+                        help="OSC target port (default 9001, the conductor's "
+                             "--listen-port)")
     parser.add_argument(
         "--rate", type=float, default=30.0, help="Message send rate in Hz"
     )

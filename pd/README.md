@@ -104,13 +104,19 @@ Target platform is **Pd 0.56+ with the ELSE library** (for `[sfont~]`):
 on Debian 13, install Pd from `trixie-backports` and ELSE via Deken (see
 `Pd_Build_Plan`). Vanilla parts run on Pd ≥ 0.51.
 
-Dev (GUI, with the simulator):
+Dev (GUI, with the simulator). The simulator now defaults to the conductor's
+port (`9001`), matching production — so run the conductor too and let it relay
+`/shrine/node/*` on to Pd:
 
 ```bash
-pd -path pd pd/main.pd            # open the engine
+pd -path pd pd/main.pd            # open the engine (binds 57120)
+uv run python -m leds.conductor   # binds 9001, relays node stream → Pd:57120
 uv run python osc-sim/generator.py --host localhost   # automated sensor data
 uv run python osc-sim/manual.py    --host localhost   # hands-on sensor data
 ```
+
+To exercise Pd standalone (no conductor), aim the simulator straight at Pd's
+bind with `--port 57120`.
 
 Production (headless), per `Pd_Architecture`:
 
