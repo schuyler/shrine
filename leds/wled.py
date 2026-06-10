@@ -15,6 +15,7 @@ class WledClient:
         self.port = port
         self.timeout = timeout
         self._failed = False
+        self._session = requests.Session()
 
     def send(self, segments) -> float | None:
         url = f"http://{self.host}:{self.port}/json/state"
@@ -34,7 +35,7 @@ class WledClient:
         }
         t0 = time.monotonic()
         try:
-            resp = requests.post(url, json=body, timeout=self.timeout)
+            resp = self._session.post(url, json=body, timeout=self.timeout)
             resp.raise_for_status()
         except requests.RequestException as exc:
             if not self._failed:
@@ -47,6 +48,9 @@ class WledClient:
             logger.info("WLED connection recovered: %s", url)
             self._failed = False
         return rtt_ms
+
+    def close(self):
+        self._session.close()
 
 
 class WledDispatcher:
@@ -99,4 +103,6 @@ class WledDispatcher:
     def close(self):
         if not self._closed:
             self._executor.shutdown(wait=False)
+            for client in self._clients.values():
+                client.close()
             self._closed = True
