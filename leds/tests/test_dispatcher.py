@@ -50,6 +50,15 @@ class TestWledDispatcherInit:
         with pytest.raises(ValueError):
             WledDispatcher(targets=[], port=80, timeout=0.1)
 
+    def test_effect_names_seeded_into_clients(self):
+        """effect_names passed to WledDispatcher must be pre-loaded into each client."""
+        names = ["Solid", "Blink", "Comet"]
+        targets = _minimal_targets()
+        dispatcher = WledDispatcher(targets=targets, port=80, timeout=0.1,
+                                    effect_names=names)
+        for client in dispatcher.clients.values():
+            assert client._effects == {"solid": 0, "blink": 1, "comet": 2}
+
 
 # ---------------------------------------------------------------------------
 # Send tests
@@ -78,8 +87,8 @@ class TestWledDispatcherSend:
             dispatcher.send({0: seg})
         mock_send_1.assert_not_called()
 
-    def test_send_duplicates_segment_to_two_identical_entries(self):
-        """Each client receives [seg, seg] — the segment duplicated."""
+    def test_send_passes_single_segment_to_client(self):
+        """Each client receives a single-element list containing its segment."""
         from unittest.mock import patch
         targets = [{"host": "192.168.1.10", "port": 80, "pad": 0}]
         dispatcher = WledDispatcher(targets=targets, port=80, timeout=0.1)
@@ -87,9 +96,8 @@ class TestWledDispatcherSend:
         with patch.object(dispatcher.clients[0], "send", return_value=5.0) as mock_send:
             dispatcher.send({0: seg})
         args = mock_send.call_args[0][0]
-        assert len(args) == 2
+        assert len(args) == 1
         assert args[0] == seg
-        assert args[1] == seg
 
     def test_send_returns_max_rtt_among_successful_sends(self):
         from unittest.mock import patch

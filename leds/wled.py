@@ -10,7 +10,8 @@ logger = logging.getLogger(__name__)
 
 
 class WledClient:
-    def __init__(self, host: str, port: int = 80, timeout: float = 1.0):
+    def __init__(self, host: str, port: int = 80, timeout: float = 1.0,
+                 effect_names: list[str] | None = None):
         self.host = host
         self.port = port
         self.timeout = timeout
@@ -18,6 +19,8 @@ class WledClient:
         self._session = requests.Session()
         self._effects: dict[str, int] | None = None
         self._warned_fx: set[str] = set()
+        if effect_names is not None:
+            self._effects = {name.lower(): idx for idx, name in enumerate(effect_names)}
 
     def _resolve_effects(self) -> None:
         url = f"http://{self.host}:{self.port}/json"
@@ -82,14 +85,13 @@ class WledClient:
 class WledDispatcher:
     """Sends pad-keyed segment data to N WLED boxes concurrently.
 
-    Each WLED box must be pre-configured with exactly 2 segments at
-    indices 0 and 1. Both segments receive identical parameters.
+    Each WLED box must be pre-configured with a single segment at index 0.
 
     Returns max RTT across successful sends — compensates for the
     slowest target to keep visual sync tight across all boxes.
     """
 
-    def __init__(self, targets, port=80, timeout=1.0):
+    def __init__(self, targets, port=80, timeout=1.0, effect_names=None):
         if not targets:
             raise ValueError("wled_targets must not be empty")
         self._clients = {}
@@ -97,7 +99,8 @@ class WledDispatcher:
             pad = entry["pad"]
             host = entry["host"]
             entry_port = entry.get("port", port)
-            self._clients[pad] = WledClient(host=host, port=entry_port, timeout=timeout)
+            self._clients[pad] = WledClient(host=host, port=entry_port, timeout=timeout,
+                                            effect_names=effect_names)
         self._executor = ThreadPoolExecutor(max_workers=len(self._clients))
         self._closed = False
 
@@ -111,7 +114,7 @@ class WledDispatcher:
             seg = pad_segments.get(pad)
             if seg is None:
                 continue
-            future = self._executor.submit(client.send, [seg, seg])
+            future = self._executor.submit(client.send, [seg])
             futures[future] = pad
 
         rtts = []

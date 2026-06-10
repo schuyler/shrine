@@ -60,6 +60,7 @@ def main():
         targets=config["wled_targets"],
         port=config["wled_port"],
         timeout=config["wled_timeout"],
+        effect_names=names,
     )
 
     palettes = load_palettes()

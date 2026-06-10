@@ -51,6 +51,21 @@ class TestWledClientInit:
         client = WledClient(host="192.168.1.10", port=80, timeout=2)
         assert client._effects is None
 
+    def test_effect_names_preseeds_effects_dict(self):
+        names = ["Solid", "Blink", "Comet"]
+        client = WledClient(host="192.168.1.10", port=80, timeout=2, effect_names=names)
+        assert client._effects == {"solid": 0, "blink": 1, "comet": 2}
+
+    def test_effect_names_skips_lazy_fetch(self):
+        """When effect_names is provided, _resolve_effects must not be called on send."""
+        names = ["Solid", "Comet"]
+        client = WledClient(host="192.168.1.10", port=80, timeout=1, effect_names=names)
+        with patch.object(client, "_resolve_effects") as mock_resolve:
+            with patch.object(client._session, "post") as mock_post:
+                mock_post.return_value = MagicMock(status_code=200)
+                client.send(_make_segments())
+        mock_resolve.assert_not_called()
+
 
 class TestWledClientSend:
     def test_send_posts_to_correct_url(self):
