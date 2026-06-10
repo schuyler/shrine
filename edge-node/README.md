@@ -65,7 +65,7 @@ node parameters. CSV templates are in `nvs/`.
 | `wifi_ssid` | string | yes | WiFi network name (max 32 chars) |
 | `wifi_pass` | string | yes | WiFi password (max 64 chars) |
 | `osc_host` | string | yes | OSC destination IP, dotted-quad (e.g. `192.168.4.255`) |
-| `osc_port` | u16 | yes | OSC destination UDP port (e.g. `57120`) |
+| `osc_port` | u16 | yes | OSC destination UDP port. Canonical: `9001` — the conductor's `--listen-port`, which relays the stream on to Pd |
 | `base_k` | u16 | no | DFT bin for node 0 (default 180) |
 | `step_k` | u16 | no | Bin spacing between nodes (default 20) |
 | `window_n` | u16 | no | Samples per demod window (default 1800) |
@@ -119,7 +119,18 @@ To change the WiFi network or OSC destination, edit the appropriate fields in
 not need to be rebuilt.
 
 To use broadcast delivery, set `osc_host` to the subnet broadcast address
-(e.g. `192.168.4.255`). `SO_BROADCAST` is always set on the UDP socket.
+(e.g. `192.168.4.255`). `SO_BROADCAST` is always set on the UDP socket. Prefer
+the subnet-directed form over limited broadcast (`255.255.255.255`), which Wi-Fi
+APs are more likely to drop or rate-limit (and which fills the 16-byte buffer
+exactly).
+
+Send to the **conductor's** port (`9001`, its `--listen-port`), not Pd's. The
+conductor binds that port once and relays `/shrine/node/*` on to Pd, so the
+sensor stream and the conductor's `/shrine/cue/*` reach Pd off its single bind.
+Any number of Python consumers can also bind `9001` (the server sets
+`SO_REUSEPORT`) and each receives its own copy of the broadcast. Do not point
+the nodes at `9000` — that is the conductor→LED-controller control port, and
+mixing the broadcast in there would disrupt that unicast stream.
 
 ## Architecture
 
