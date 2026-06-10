@@ -138,7 +138,6 @@ install_systemd_units() {
         systemctl daemon-reload
     fi
 
-    # Enable but don't start
     for unit in "${units[@]}"; do
         if [[ ! -f "/etc/systemd/system/${unit}.service" ]]; then
             continue
@@ -148,6 +147,19 @@ install_systemd_units() {
         else
             install "Enabling ${unit}.service"
             systemctl enable "${unit}.service"
+        fi
+    done
+
+    # Start (or restart if config changed)
+    for unit in "${units[@]}"; do
+        if [[ ! -f "/etc/systemd/system/${unit}.service" ]]; then
+            continue
+        fi
+        if [[ "${changed}" == "true" ]] || ! systemctl is-active --quiet "${unit}.service" 2>/dev/null; then
+            install "Starting ${unit}.service"
+            systemctl restart "${unit}.service"
+        else
+            ok "${unit}.service already running"
         fi
     done
 }
