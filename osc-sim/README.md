@@ -47,6 +47,23 @@ Controls (also shown in the footer):
 
 Useful flags: `--rate HZ` (default 30), `--no-smoothing`, `--jitter`.
 
+#### Realistic output (the `j` / `--jitter` toggle)
+
+Real sensor lines don't sit on a clean DC value — they fluctuate, drift, and
+(on skin contact) pulse at heart rate. With jitter on, each channel rides on:
+
+* **measurement noise** — a mean-reverting (Ornstein–Uhlenbeck) fluctuation
+  around the dialed baseline, with a small rest floor that grows with level;
+* **slow DC drift** — a much slower wander of the baseline;
+* **heartbeat** (couplings only) — each node is assigned a fixed heart rate in
+  60–100 bpm, and a coupling carries *both* contacting people's pulses (so two
+  hearts beat against each other), scaled by the coupling level. This is the
+  pulsatile signal the downstream `/leds/heartbeat` detector keys on.
+
+All noise for a coupling is generated per pair, so both reporting nodes stay
+identical (pair symmetry holds). Presence channels get noise and drift but no
+heartbeat. Parameters are tuned defaults; the toggle just turns it on or off.
+
 ### Desktop GUI (`manual_gui.py`)
 
 `manual_gui.py` is a Qt (PySide6) desktop front-end over the *same* state model

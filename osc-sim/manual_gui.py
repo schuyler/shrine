@@ -173,6 +173,7 @@ class MixerWindow(QMainWindow):
         self.state = ManualState(smoothing=smoothing, jitter=jitter)
         self.clients = clients
         self.start = time.monotonic()
+        self.dt = 1.0 / rate
         self.channels = self.state.channels()
         self.sel = 0
 
@@ -261,7 +262,7 @@ class MixerWindow(QMainWindow):
 
     def _tick(self):
         t = time.monotonic() - self.start
-        self.state.update()
+        self.state.update(self.dt)
         self.state.send(self.clients, t)
         self._sync_widgets()
 

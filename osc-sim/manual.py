@@ -38,15 +38,16 @@ Controls (shown in the footer at all times):
 
 import argparse
 import curses
+import math
+import random
 import sys
 import time
 
 from pythonosc.udp_client import SimpleUDPClient
 
-# Reuse the broadcast client and noise generator from the automated simulator,
-# and the canonical pair layout from the receiver, so everything shares one
-# source of truth for those behaviours.
-from generator import BroadcastUDPClient, layered_noise
+# Reuse the broadcast client from the automated simulator, and the canonical
+# pair layout from the receiver, so everything shares one source of truth.
+from generator import BroadcastUDPClient
 from leds.sensor_state import GSR_PAIRS as NODE_PAIRS, NODE_GSR_MAPPING
 
 NUM_NODES = 4
@@ -61,11 +62,44 @@ STEP = 0.05          # coarse adjust per keypress
 FINE_STEP = 0.01     # fine adjust per keypress
 SMOOTHING_RATE = 0.2  # per-tick easing toward target when smoothing is on
 BAR_WIDTH = 8        # filled-bar width in characters
+NOMINAL_DT = 1.0 / 30.0  # default tick used when a caller omits dt
 
-# Per-channel jitter phase offsets. Pairs are keyed by pair index (not by node)
-# so both nodes reporting a pair get identical jitter and stay symmetric.
-_PRESENCE_OFFSET = 1.1
-_PAIR_OFFSET_BASE = 100.0
+# --- Realistic-output model (the "jitter" toggle) --------------------------
+# Real sensor lines fluctuate around a steady DC baseline, and skin contact
+# pulses at heart rate. With jitter on, each channel rides on:
+#   * an Ornstein-Uhlenbeck (mean-reverting) process for fast measurement noise,
+#   * a much slower OU for DC drift,
+#   * (couplings only) a heartbeat pulse from both contacting people.
+# OU processes are standardized to unit stationary std and scaled at apply time;
+# fast amplitude has a rest floor and grows with level. All noise for a coupling
+# is generated per pair (not per node) so both reporting nodes stay identical,
+# preserving pair symmetry.
+TAU_FAST_PRESENCE = 0.25   # correlation time (s) for capacitive presence noise
+TAU_FAST_GSR = 0.6         # correlation time (s) for GSR coupling noise
+TAU_DRIFT = 10.0           # correlation time (s) for slow baseline drift
+NOISE_FLOOR = 0.012        # fluctuation std at rest (level 0)
+NOISE_GAIN = 0.03          # extra fluctuation std per unit level
+DRIFT_STD = 0.02           # baseline drift std
+
+# Heartbeat: in practice skin contact oscillates at the contacting people's
+# pulse. Each node gets a heart rate in [60, 100] bpm; a coupling carries both
+# endpoints' pulses (so two hearts beat against each other), scaled by the
+# coupling level so no contact means no pulse. Downstream this is what the
+# /leds/heartbeat detector keys on.
+HB_BPM_MIN = 60.0
+HB_BPM_MAX = 100.0
+HB_SHARPNESS = 2.5         # waveform peakiness (higher = sharper systolic bump)
+HB_AMP = 0.18              # peak pulse contribution per unit coupling level
+
+
+def _hb_pulse_raw(phase: float) -> float:
+    """A unipolar, PPG-like bump per cycle, peak 1.0 at phase 0."""
+    return math.exp(HB_SHARPNESS * (math.cos(2.0 * math.pi * phase) - 1.0))
+
+
+# Per-cycle mean, so the centered pulse is zero-mean (oscillates around the DC
+# baseline rather than biasing it upward).
+HB_MEAN = sum(_hb_pulse_raw(k / 256.0) for k in range(256)) / 256.0
 
 
 def _clamp(v: float) -> float:
@@ -83,7 +117,7 @@ class ManualState:
     suppresses its presence and every coupling it participates in.
     """
 
-    def __init__(self, smoothing: bool = True, jitter: bool = False):
+    def __init__(self, smoothing: bool = True, jitter: bool = False, seed=None):
         self.pres_target = [[0.0] * NUM_PRESENCE for _ in range(NUM_NODES)]
         self.pres_current = [[0.0] * NUM_PRESENCE for _ in range(NUM_NODES)]
         self.pres_muted = [[False] * NUM_PRESENCE for _ in range(NUM_NODES)]
@@ -93,6 +127,19 @@ class ManualState:
         self.released = [False] * NUM_NODES
         self.smoothing = smoothing
         self.jitter = jitter
+
+        # Per-channel noise state. Keyed by channel so a pair has one shared
+        # process feeding both nodes (keeping the two sides symmetric).
+        self._rng = random.Random(seed)
+        self._chans = self.channels()
+        self._ou = {ch: 0.0 for ch in self._chans}      # fast measurement noise
+        self._drift = {ch: 0.0 for ch in self._chans}    # slow DC drift
+
+        # Per-node heartbeat: a fixed rate (Hz) and an advancing phase.
+        self._hr_freq = [
+            self._rng.uniform(HB_BPM_MIN, HB_BPM_MAX) / 60.0 for _ in range(NUM_NODES)
+        ]
+        self._hr_phase = [self._rng.random() for _ in range(NUM_NODES)]
 
     # ---- channel addressing -------------------------------------------------
     # A channel key is ("pres", node, idx) or ("pair", pair_idx). The ordered
@@ -178,18 +225,52 @@ class ManualState:
             return target
         return current + SMOOTHING_RATE * (target - current)
 
-    def update(self) -> None:
+    def _step_ou(self, value: float, tau: float, dt: float) -> float:
+        """Advance one standardized OU process (stationary std ≈ 1)."""
+        return (
+            value
+            - (value / tau) * dt
+            + math.sqrt(2.0 / tau) * math.sqrt(dt) * self._rng.gauss(0.0, 1.0)
+        )
+
+    def _advance_noise(self, dt: float) -> None:
+        for ch in self._chans:
+            tau = TAU_FAST_GSR if ch[0] == "pair" else TAU_FAST_PRESENCE
+            self._ou[ch] = self._step_ou(self._ou[ch], tau, dt)
+            self._drift[ch] = self._step_ou(self._drift[ch], TAU_DRIFT, dt)
+        for n in range(NUM_NODES):
+            self._hr_phase[n] = (self._hr_phase[n] + self._hr_freq[n] * dt) % 1.0
+
+    def _noise(self, ch, level: float) -> float:
+        """Noise offset for a channel at the given clean level."""
+        amp = NOISE_FLOOR + NOISE_GAIN * level
+        return amp * self._ou[ch] + DRIFT_STD * self._drift[ch]
+
+    def _hb_pulse(self, node: int) -> float:
+        """One node's centered (zero-mean) heartbeat pulse, now."""
+        return _hb_pulse_raw(self._hr_phase[node]) - HB_MEAN
+
+    def _heartbeat(self, pair_idx: int, level: float) -> float:
+        """Heartbeat offset for a coupling: both endpoints' pulses, scaled."""
+        a, b = NODE_PAIRS[pair_idx]
+        return HB_AMP * level * 0.5 * (self._hb_pulse(a) + self._hb_pulse(b))
+
+    def update(self, dt: float = NOMINAL_DT) -> None:
         for n in range(NUM_NODES):
             for i in range(NUM_PRESENCE):
                 self.pres_current[n][i] = self._ease(self.pres_current[n][i], self.pres_target[n][i])
         for p in range(NUM_PAIRS):
             self.pair_current[p] = self._ease(self.pair_current[p], self.pair_target[p])
+        if self.jitter:
+            self._advance_noise(dt)
 
-    def payloads(self, t: float) -> dict:
+    def payloads(self, t: float = 0.0) -> dict:
         """Build the OSC payload for each node from the current values.
 
         Each node's three GSR slots are filled from the shared pair values via
         NODE_GSR_MAPPING, so both nodes of a pair always report the same number.
+        When jitter is on, realistic noise (advanced in update()) rides on top;
+        pair noise is shared, so the two sides stay identical.
         """
         sent = {}
         for n in range(NUM_NODES):
@@ -198,9 +279,10 @@ class ManualState:
                 if self.released[n] or self.pres_muted[n][i]:
                     args.append(0.0)
                     continue
-                v = self.pres_current[n][i]
+                level = self.pres_current[n][i]
+                v = level
                 if self.jitter:
-                    v += layered_noise(t, (n * NUM_PRESENCE + i) * _PRESENCE_OFFSET)
+                    v += self._noise(("pres", n, i), level)
                 args.append(_clamp(v))
 
             for slot in range(3):
@@ -209,16 +291,16 @@ class ManualState:
                 if self.pair_muted[p] or self.released[a] or self.released[b]:
                     args.append(0.0)
                     continue
-                v = self.pair_current[p]
+                level = self.pair_current[p]
+                v = level
                 if self.jitter:
-                    # Keyed by pair, not node, so both sides jitter identically.
-                    v += layered_noise(t, (_PAIR_OFFSET_BASE + p) * _PRESENCE_OFFSET)
+                    v += self._noise(("pair", p), level) + self._heartbeat(p, level)
                 args.append(_clamp(v))
 
             sent[f"/shrine/node/{n}"] = args
         return sent
 
-    def send(self, clients: list, t: float) -> dict:
+    def send(self, clients: list, t: float = 0.0) -> dict:
         sent = self.payloads(t)
         for address, args in sent.items():
             for client in clients:
@@ -381,7 +463,7 @@ def _loop(stdscr, clients: list, rate: float, smoothing: bool, jitter: bool):
         elif key == ord("J"):
             state.jitter = not state.jitter
 
-        state.update()
+        state.update(tick)
         state.send(clients, t)
         _draw(stdscr, state, sel, header)
 
