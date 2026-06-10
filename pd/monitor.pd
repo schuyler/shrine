@@ -30,3 +30,9 @@
 #X obj 200 230 r gsr-mag-5;
 #X obj 200 260 print gsr-mag-5;
 #X connect 19 0 20 0;
+#X obj 370 230 r shrine-state;
+#X obj 370 260 print shrine-state;
+#X connect 21 0 22 0;
+#X obj 540 230 r shrine-group;
+#X obj 540 260 print shrine-group;
+#X connect 23 0 24 0;
