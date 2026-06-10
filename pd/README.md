@@ -87,7 +87,7 @@ two patches binding 57120 would contend, not both receive). It publishes:
 | `state-table.pd` | **verified** | maps `shrine-state` int (0–4) → mode symbol on `s scene-mode`; arc: quiet/seeking → major-penta, aligning → dorian, energizing → mixolydian-b6, ascending → ionian |
 | `mode-table.pd` | **verified** | routes `scene-mode` symbol → writes `mode-intervals` array + `mode-size` + `mode-changed`; handles 9 modes including `mixolydian-b6` |
 | `restless.pd` | **verified** | fluctuation proxy 0–1 (replaces absent gsr-stdev) |
-| `melodic-voice.pd` | unverified (reworked) | bang-triggered per-pair walk → `pitch velocity` pairs out an outlet → texture `Note` inlet |
+| `melodic-voice.pd` | unverified (reworked) | inlet0 bang advances the walk (+ `octave N` msg); inlet1 velocity 0–1 (from cap-trigger). Common tonic via `[r shrine-root]`, effective root = `shrine-root + 12·octave`. Emits `pitch velocity` pairs → texture `Note` inlet |
 | `heartbeat.pd` | verified | STUB: constant 60 BPM + 0 detune (per build plan) |
 | `monitor.pd` | verified (load) | DEV-ONLY bus printer (do not load in production) |
 | `main.pd` | verified (load) | top level: OSC + 4 drones + master |
