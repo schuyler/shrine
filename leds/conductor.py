@@ -6,15 +6,14 @@ messages to the LED stack and Pd.
 
 import argparse
 import logging
-import socket
 import threading
 import time
 
 from pythonosc.dispatcher import Dispatcher
-from pythonosc.osc_server import ThreadingOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
 
 from leds.conductor_config import load_conductor_config
+from leds.osc_server import ReusePortOSCUDPServer
 from leds.sensor_state import SensorState
 from leds.state_machine import GroupChangedEvent, State, StateMachine, StateChangedEvent
 
@@ -38,11 +37,18 @@ _STATE_PALETTES: dict[State, str] = {
 }
 
 
-def _build_shrine_dispatcher(sensor_state: SensorState) -> Dispatcher:
+def _build_shrine_dispatcher(
+    sensor_state: SensorState,
+    pd_client: SimpleUDPClient | None = None,
+) -> Dispatcher:
     dispatcher = Dispatcher()
 
     def node_handler(address: str, *args):
         # /shrine/node/<id>  →  stdev, carrier_mag, gsr0, gsr1, gsr2
+        # Relay the raw sensor stream to Pd so the audio engine and the
+        # conductor share one broadcast without Pd needing SO_REUSEPORT.
+        if pd_client is not None:
+            pd_client.send_message(address, list(args))
         try:
             node_id = int(address.split("/")[-1])
             if len(args) >= 5:
@@ -93,9 +99,8 @@ def main() -> None:
     led_client = SimpleUDPClient(args.led_host, args.led_port)
     pd_client = SimpleUDPClient(args.pd_host, args.pd_port)
 
-    dispatcher = _build_shrine_dispatcher(sensor_state)
-    server = ThreadingOSCUDPServer((args.listen_host, args.listen_port), dispatcher)
-    server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    dispatcher = _build_shrine_dispatcher(sensor_state, pd_client)
+    server = ReusePortOSCUDPServer((args.listen_host, args.listen_port), dispatcher)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
 
