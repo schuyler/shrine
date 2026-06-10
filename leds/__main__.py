@@ -5,7 +5,7 @@ import socket
 import threading
 import time
 
-from pythonosc.server import ThreadingOSCUDPServer
+from pythonosc.osc_server import ThreadingOSCUDPServer
 
 from leds.clock import Clock
 from leds.config import load_config

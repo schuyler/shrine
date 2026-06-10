@@ -11,7 +11,7 @@ import threading
 import time
 
 from pythonosc.dispatcher import Dispatcher
-from pythonosc.server import ThreadingOSCUDPServer
+from pythonosc.osc_server import ThreadingOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
 
 from leds.conductor_config import load_conductor_config
