@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pythonosc.udp_client import SimpleUDPClient  # noqa: E402
 
+from leds.config import load_config  # noqa: E402
 from leds.effects import EffectIndex, fetch_effect_names  # noqa: E402
 
 
@@ -49,22 +50,32 @@ def main():
     parser.add_argument("--port", type=int, default=9000, help="LED controller OSC port")
     parser.add_argument("--wled-host", default=None,
                         help="fetch live effect names from this WLED node "
-                             "(otherwise uses the built-in name table)")
+                             "(defaults to first target in config)")
     parser.add_argument("--wled-port", type=int, default=80, help="WLED HTTP port")
     parser.add_argument("--list", action="store_true", help="list known effect names and exit")
     parser.add_argument("--clear-all", action="store_true",
                         help="release every manual effect override")
     args = parser.parse_args()
 
-    # Resolve names against the live node list if one was given, else the
-    # built-in table.  This matches whatever the LED controller itself uses.
+    # Resolve names from the live node. If --wled-host isn't given, fall back
+    # to the first target in the config; if that also fails, use the built-in table.
     effects = EffectIndex()
-    if args.wled_host:
-        names = fetch_effect_names(args.wled_host, args.wled_port)
+    wled_host = args.wled_host
+    wled_port = args.wled_port
+    if wled_host is None:
+        try:
+            cfg = load_config()
+            first = cfg["wled_targets"][0]
+            wled_host = first["host"]
+            wled_port = first.get("port", cfg.get("wled_port", wled_port))
+        except Exception:
+            pass
+    if wled_host:
+        names = fetch_effect_names(wled_host, wled_port)
         if names:
             effects.update_from_names(names)
         else:
-            print(f"Warning: could not fetch effects from {args.wled_host}; "
+            print(f"Warning: could not fetch effects from {wled_host}; "
                   "using built-in names", file=sys.stderr)
 
     if args.list:

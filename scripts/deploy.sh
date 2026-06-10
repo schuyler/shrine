@@ -10,8 +10,7 @@ rsync -avz \
     --exclude='.envrc' \
     --exclude='nvs/*.csv' \
     --exclude='wled/*.bin' \
-    --exclude='pd/main.pd' \   # main.pd is GUI-edited on corazon; never overwrite
-
+    --exclude='pd/main.pd' \
     ./ corazon.local:shrine/
 
 echo
