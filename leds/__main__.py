@@ -8,6 +8,7 @@ from pythonosc.osc_server import BlockingOSCUDPServer
 
 from leds.clock import Clock
 from leds.config import load_config
+from leds.effects import EffectIndex, fetch_effect_names
 from leds.osc_input import build_dispatcher
 from leds.pad_state import PadState
 from leds.palettes import load_palettes
@@ -38,7 +39,23 @@ def main():
     if sig_colors:
         state.set_signature_colors(sig_colors)
 
-    dispatcher = build_dispatcher(state)
+    # Pull the live effect list from the first WLED node so /leds/effect names
+    # match the running firmware exactly; fall back to the built-in table.
+    effects = EffectIndex()
+    first_target = config["wled_targets"][0]
+    names = fetch_effect_names(
+        first_target["host"],
+        first_target.get("port", config["wled_port"]),
+    )
+    if names:
+        effects.update_from_names(names)
+        logger.info("Loaded %d WLED effect names from %s",
+                    len(names), first_target["host"])
+    else:
+        logger.info("Using built-in WLED effect name table "
+                    "(could not fetch from %s)", first_target["host"])
+
+    dispatcher = build_dispatcher(state, effects)
     wled = WledDispatcher(
         targets=config["wled_targets"],
         port=config["wled_port"],

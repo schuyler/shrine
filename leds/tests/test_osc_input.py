@@ -258,6 +258,16 @@ class TestEffectHandler:
         _call(dispatcher, "/leds/effect/clear")
         assert state.effect_overrides() == {}
 
+    def test_uses_supplied_effect_index(self):
+        # A name only present in the live (fetched) index resolves correctly.
+        from leds.effects import EffectIndex
+        effects = EffectIndex()
+        effects.update_from_names(["Solid", "Custom Glow"])  # index 1
+        state = PadState([0, 1, 2, 3])
+        dispatcher = build_dispatcher(state, effects)
+        _call(dispatcher, "/leds/effect", 0, "custom glow")
+        assert state.effect_overrides()[0].fx == 1
+
 
 class TestOutOfRangePad:
     def test_cap_unknown_pad_does_not_crash(self):

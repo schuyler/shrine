@@ -5,13 +5,15 @@ import time
 
 from pythonosc.dispatcher import Dispatcher
 
-from leds.effects import resolve_effect
+from leds.effects import EffectIndex
 from leds.pad_state import EffectOverride, PadState
 
 logger = logging.getLogger(__name__)
 
 
-def build_dispatcher(state: PadState) -> Dispatcher:
+def build_dispatcher(state: PadState, effects: EffectIndex | None = None) -> Dispatcher:
+    if effects is None:
+        effects = EffectIndex()
     dispatcher = Dispatcher()
 
     # /leds/cap <pad_0idx> <float 0-1>
@@ -55,7 +57,7 @@ def build_dispatcher(state: PadState) -> Dispatcher:
         if str(effect).strip().lower() in _CLEAR_TOKENS:
             state.clear_effect(pad)
             return
-        fx = resolve_effect(effect)
+        fx = effects.resolve(effect)
         if fx is None:
             logger.warning("Unknown WLED effect: %r", effect)
             return

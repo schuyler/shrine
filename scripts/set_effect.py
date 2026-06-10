@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pythonosc.udp_client import SimpleUDPClient  # noqa: E402
 
-from leds.effects import effect_names, resolve_effect  # noqa: E402
+from leds.effects import EffectIndex, fetch_effect_names  # noqa: E402
 
 
 def main():
@@ -47,13 +47,28 @@ def main():
     parser.add_argument("--pal", type=int, default=0, help="WLED palette index")
     parser.add_argument("--host", default="127.0.0.1", help="LED controller host")
     parser.add_argument("--port", type=int, default=9000, help="LED controller OSC port")
+    parser.add_argument("--wled-host", default=None,
+                        help="fetch live effect names from this WLED node "
+                             "(otherwise uses the built-in name table)")
+    parser.add_argument("--wled-port", type=int, default=80, help="WLED HTTP port")
     parser.add_argument("--list", action="store_true", help="list known effect names and exit")
     parser.add_argument("--clear-all", action="store_true",
                         help="release every manual effect override")
     args = parser.parse_args()
 
+    # Resolve names against the live node list if one was given, else the
+    # built-in table.  This matches whatever the LED controller itself uses.
+    effects = EffectIndex()
+    if args.wled_host:
+        names = fetch_effect_names(args.wled_host, args.wled_port)
+        if names:
+            effects.update_from_names(names)
+        else:
+            print(f"Warning: could not fetch effects from {args.wled_host}; "
+                  "using built-in names", file=sys.stderr)
+
     if args.list:
-        print("\n".join(effect_names()))
+        print("\n".join(effects.names()))
         return
 
     client = SimpleUDPClient(args.host, args.port)
@@ -72,7 +87,7 @@ def main():
         print(f"Cleared effect on pad {args.pad} → {args.host}:{args.port}")
         return
 
-    if resolve_effect(args.effect) is None:
+    if effects.resolve(args.effect) is None:
         parser.error(
             f"unknown effect {args.effect!r}; use a numeric fx ID or one of "
             f"--list names"
