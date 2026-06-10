@@ -298,3 +298,126 @@ class TestBreatheProgramSignatureColor:
         segments, _ = prog.render(pads, palette, make_clock(), {})
         assert segments[0].col == [sig_color]
         assert segments[1].col == [palette.get("idle")]
+
+
+# ---------------------------------------------------------------------------
+# Chase program
+# ---------------------------------------------------------------------------
+
+class TestChaseProgram:
+    def test_chase_is_registered(self):
+        assert "chase" in list_programs()
+
+    def test_chase_name(self):
+        prog = get_program("chase")
+        assert prog.name == "chase"
+
+    def test_chase_render_returns_one_segment_per_pad(self):
+        prog = get_program("chase")
+        pads = [make_pad() for _ in range(4)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert len(segments) == 4
+
+    def test_chase_active_pad_produces_fx_28(self):
+        """Active pad (heartbeat > 0) uses WLED Chase effect fx=28."""
+        prog = get_program("chase")
+        pads = [make_pad(heartbeat=1.5)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segments[0].fx == 28
+
+    def test_chase_active_pad_sx_maps_linearly(self):
+        """heartbeat=1.75 Hz (midpoint of [0.5, 3.0]) → sx=130 (midpoint of [60, 200])."""
+        prog = get_program("chase")
+        pads = [make_pad(heartbeat=1.75)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segments[0].sx == 130
+
+    def test_chase_active_pad_brightness_is_255(self):
+        prog = get_program("chase")
+        pads = [make_pad(heartbeat=1.5)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segments[0].bri == 255
+
+    def test_chase_active_pad_uses_signature_color(self):
+        """Active pad with signature_color uses it as col[0]."""
+        prog = get_program("chase")
+        sig_color = [200, 100, 50]
+        pads = [make_pad(heartbeat=1.5, signature_color=sig_color)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segments[0].col[0] == sig_color
+
+    def test_chase_active_pad_falls_back_to_palette_idle(self):
+        """Active pad without signature_color uses palette idle as col[0]."""
+        prog = get_program("chase")
+        palette = make_palette()
+        pads = [make_pad(heartbeat=1.5, signature_color=None)]
+        segments, _ = prog.render(pads, palette, make_clock(), {})
+        assert segments[0].col[0] == palette.get("idle")
+
+    def test_chase_inactive_pad_produces_fx_0(self):
+        """Inactive pad (heartbeat=0) uses fx=0 (solid/breathe mode)."""
+        prog = get_program("chase")
+        pads = [make_pad(heartbeat=0.0)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segments[0].fx == 0
+
+    def test_chase_inactive_pad_brightness_at_cap_zero(self):
+        """Inactive pad at cap=0 has brightness 20 (same as breathe)."""
+        prog = get_program("chase")
+        pads = [make_pad(cap=0.0, heartbeat=0.0)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segments[0].bri == 20
+
+    def test_chase_inactive_pad_brightness_at_cap_one(self):
+        """Inactive pad at cap=1 has brightness 255 (same as breathe)."""
+        prog = get_program("chase")
+        pads = [make_pad(cap=1.0, heartbeat=0.0)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segments[0].bri == 255
+
+    def test_chase_inactive_pad_color_at_cap_zero_uses_palette_idle(self):
+        """Inactive pad at cap=0 uses palette idle color."""
+        prog = get_program("chase")
+        palette = make_palette()
+        pads = [make_pad(cap=0.0, heartbeat=0.0, signature_color=None)]
+        segments, _ = prog.render(pads, palette, make_clock(), {})
+        assert segments[0].col == [palette.get("idle")]
+
+    def test_chase_mixed_pads_produce_different_fx(self):
+        """Active and inactive pads in same render call produce fx=28 and fx=0 respectively."""
+        prog = get_program("chase")
+        palette = make_palette()
+        pads = [
+            make_pad(heartbeat=1.5),   # active
+            make_pad(heartbeat=0.0),   # inactive
+        ]
+        segments, _ = prog.render(pads, palette, make_clock(), {})
+        assert segments[0].fx == 28
+        assert segments[1].fx == 0
+
+    def test_chase_sx_clamp_low_heartbeat(self):
+        """Heartbeat below 0.5 Hz clamps sx to 60."""
+        prog = get_program("chase")
+        pads = [make_pad(heartbeat=0.1)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segments[0].sx == 60
+
+    def test_chase_sx_clamp_high_heartbeat(self):
+        """Heartbeat above 3.0 Hz clamps sx to 200."""
+        prog = get_program("chase")
+        pads = [make_pad(heartbeat=5.0)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert segments[0].sx == 200
+
+    def test_chase_inactive_pad_with_signature_color(self):
+        """Inactive pad with signature_color uses it as base for color lerp."""
+        prog = get_program("chase")
+        palette = make_palette()
+        sig_color = [200, 100, 50]
+        pad_with = make_pad(cap=0.0, heartbeat=0.0, signature_color=sig_color)
+        pad_without = make_pad(cap=0.0, heartbeat=0.0, signature_color=None)
+        segs_with, _ = prog.render([pad_with], palette, make_clock(), {})
+        segs_without, _ = prog.render([pad_without], palette, make_clock(), {})
+        # At cap=0, signature_color pad uses sig_color, non-signature uses palette idle
+        assert segs_with[0].col == [sig_color]
+        assert segs_without[0].col == [palette.get("idle")]

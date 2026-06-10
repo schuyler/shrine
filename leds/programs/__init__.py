@@ -47,3 +47,4 @@ def list_programs() -> list[str]:
 
 # Import built-in programs to trigger registration.
 from leds.programs import breathe as _breathe  # noqa: E402, F401
+from leds.programs import chase as _chase  # noqa: E402, F401

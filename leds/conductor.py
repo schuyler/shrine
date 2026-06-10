@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Values here are placeholders to reconcile with Lighting_Architecture.
 _STATE_PROGRAMS: dict[State, str] = {
     State.QUIET: "breathe",
-    State.SEEKING: "breathe",
+    State.SEEKING: "chase",
     State.ALIGNING: "breathe",
     State.ENERGIZING: "breathe",
     State.ASCENDING: "breathe",
