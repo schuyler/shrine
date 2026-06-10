@@ -696,3 +696,106 @@ class TestBloomProgram:
         pads = [make_pad() for _ in range(4)]
         _, state = prog.render(pads, make_palette(), make_clock(), {})
         assert state == {}
+
+
+# ---------------------------------------------------------------------------
+# Dazzle program
+# ---------------------------------------------------------------------------
+
+class TestDazzleProgram:
+    def test_dazzle_is_registered(self):
+        assert "dazzle" in list_programs()
+
+    def test_dazzle_name(self):
+        prog = get_program("dazzle")
+        assert prog.name == "dazzle"
+
+    def test_dazzle_render_returns_one_segment_per_pad(self):
+        prog = get_program("dazzle")
+        pads = [make_pad(signature_color=[255, 0, 0]) for _ in range(4)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        assert len(segments) == 4
+
+    def test_dazzle_full_brightness(self):
+        """All pads at bri=255."""
+        prog = get_program("dazzle")
+        pads = [make_pad(signature_color=[255, 0, 0]) for _ in range(4)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        for seg in segments:
+            assert seg.bri == 255
+
+    def test_dazzle_uses_solid_fx(self):
+        """All pads use fx=0 (Solid)."""
+        prog = get_program("dazzle")
+        pads = [make_pad(signature_color=[255, 0, 0]) for _ in range(4)]
+        segments, _ = prog.render(pads, make_palette(), make_clock(), {})
+        for seg in segments:
+            assert seg.fx == 0
+
+    def test_dazzle_bar_zero_no_rotation(self):
+        """At bar=0.0, colors are in original pad order."""
+        prog = get_program("dazzle")
+        sig = [[217, 24, 40], [2, 136, 166], [217, 207, 74], [242, 174, 48]]
+        pads = [make_pad(signature_color=s) for s in sig]
+        clock = ClockPhase(beat=0.0, bar=0.0, bpm=120.0)
+        segs, _ = prog.render(pads, make_palette(), clock, {})
+        for i, s in enumerate(sig):
+            assert segs[i].col == [s]
+
+    def test_dazzle_rotates_one_step_at_quarter_bar(self):
+        """At bar=0.25 (beat 1 of 4), colors shift by one station."""
+        prog = get_program("dazzle")
+        sig = [[217, 24, 40], [2, 136, 166], [217, 207, 74], [242, 174, 48]]
+        pads = [make_pad(signature_color=s) for s in sig]
+        clock = ClockPhase(beat=0.0, bar=0.25, bpm=120.0)
+        segs, _ = prog.render(pads, make_palette(), clock, {})
+        # offset=1: pad 0 gets color from index (0-1)%4 = 3
+        assert segs[0].col == [sig[3]]
+        assert segs[1].col == [sig[0]]
+        assert segs[2].col == [sig[1]]
+        assert segs[3].col == [sig[2]]
+
+    def test_dazzle_rotates_two_steps_at_half_bar(self):
+        """At bar=0.5 (beat 2 of 4), colors shift by two stations."""
+        prog = get_program("dazzle")
+        sig = [[217, 24, 40], [2, 136, 166], [217, 207, 74], [242, 174, 48]]
+        pads = [make_pad(signature_color=s) for s in sig]
+        clock = ClockPhase(beat=0.0, bar=0.5, bpm=120.0)
+        segs, _ = prog.render(pads, make_palette(), clock, {})
+        assert segs[0].col == [sig[2]]
+        assert segs[1].col == [sig[3]]
+        assert segs[2].col == [sig[0]]
+        assert segs[3].col == [sig[1]]
+
+    def test_dazzle_full_rotation_wraps(self):
+        """At bar=1.0 (wraps to 0.0), back to original order."""
+        prog = get_program("dazzle")
+        sig = [[217, 24, 40], [2, 136, 166], [217, 207, 74], [242, 174, 48]]
+        pads = [make_pad(signature_color=s) for s in sig]
+        # bar phase wraps, so 0.999... should be offset 3
+        clock_start = ClockPhase(beat=0.0, bar=0.0, bpm=120.0)
+        segs, _ = prog.render(pads, make_palette(), clock_start, {})
+        for i, s in enumerate(sig):
+            assert segs[i].col == [s]
+
+    def test_dazzle_falls_back_to_palette_idle(self):
+        """Pads without signature_color use palette idle."""
+        prog = get_program("dazzle")
+        palette = make_palette()
+        pads = [make_pad(signature_color=None) for _ in range(4)]
+        clock = ClockPhase(beat=0.0, bar=0.0, bpm=120.0)
+        segs, _ = prog.render(pads, palette, clock, {})
+        for seg in segs:
+            assert seg.col == [palette.get("idle")]
+
+    def test_dazzle_empty_pads(self):
+        prog = get_program("dazzle")
+        segs, state = prog.render([], make_palette(), make_clock(), {})
+        assert segs == []
+        assert state == {}
+
+    def test_dazzle_returns_empty_state(self):
+        prog = get_program("dazzle")
+        pads = [make_pad(signature_color=[255, 0, 0]) for _ in range(4)]
+        _, state = prog.render(pads, make_palette(), make_clock(), {})
+        assert state == {}

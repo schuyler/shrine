@@ -51,3 +51,4 @@ from leds.programs import chase as _chase  # noqa: E402, F401
 from leds.programs import pulse as _pulse  # noqa: E402, F401
 from leds.programs import converge as _converge  # noqa: E402, F401
 from leds.programs import bloom as _bloom  # noqa: E402, F401
+from leds.programs import dazzle as _dazzle  # noqa: E402, F401
