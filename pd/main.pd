@@ -1,5 +1,5 @@
 #N canvas 541 187 1455 1671 12;
-#X obj 284 577 master;
+#X obj 284 650 master;
 #N canvas 374 52 1844 1400 brent 1;
 #X obj 205 25 inlet;
 #X obj 753 28 inlet;
@@ -158,10 +158,13 @@
 #X obj 592 108 cap-trigger 0.1;
 #X obj 1200 12 loadbang;
 #X msg 1200 52 \; pd dsp 1;
+#X obj 120 430 channel-send;
+#X obj 400 430 channel-send;
+#X obj 642 430 channel-send;
 #X connect 24 0 25 0;
-#X connect 1 0 0 0;
-#X connect 2 0 0 1;
-#X connect 16 0 0 2;
+#X connect 1 0 26 0;
+#X connect 2 0 27 0;
+#X connect 16 0 28 0;
 #X connect 4 0 5 0;
 #X connect 5 0 1 0;
 #X connect 5 1 1 1;
