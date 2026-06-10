@@ -21,7 +21,7 @@ Each pair is observed from both sides; latest value wins.
 Usage:
     python fdm-bench/plot_fdm_osc.py
     python fdm-bench/plot_fdm_osc.py --port 9000
-    python fdm-bench/plot_fdm_osc.py --host 0.0.0.0 --port 57120
+    python fdm-bench/plot_fdm_osc.py --host 0.0.0.0 --port 9001
 
 Requires: pip install pythonosc matplotlib numpy scipy
 """
@@ -37,7 +37,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.widgets import Button
 from pythonosc.dispatcher import Dispatcher
-from pythonosc.osc_server import BlockingOSCUDPServer
+from leds.osc_server import ReusePortOSCUDPServer
 
 from leds.sensor_state import GSR_PAIRS, NODE_GSR_MAPPING
 
@@ -137,7 +137,7 @@ def _trim(ts_dq, val_dq, t_cutoff):
 def main():
     parser = argparse.ArgumentParser(description="Real-time OSC plotter for 4-node FDM system.")
     parser.add_argument("--host", default="0.0.0.0", help="OSC listen address (default: 0.0.0.0)")
-    parser.add_argument("--port", type=int, default=57120, help="OSC listen port (default: 57120)")
+    parser.add_argument("--port", type=int, default=9001, help="OSC listen port (default: 9001)")
     args = parser.parse_args()
 
     # --- OSC server ---
@@ -145,7 +145,7 @@ def main():
     for node_id in range(4):
         dispatcher.map(f"/shrine/node/{node_id}", _make_node_handler(node_id))
 
-    server = BlockingOSCUDPServer((args.host, args.port), dispatcher)
+    server = ReusePortOSCUDPServer((args.host, args.port), dispatcher)
 
     global _t0
     _t0 = time.time()

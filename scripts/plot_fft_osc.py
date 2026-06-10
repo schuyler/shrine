@@ -24,7 +24,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from pythonosc.dispatcher import Dispatcher
-from pythonosc.osc_server import BlockingOSCUDPServer
+from leds.osc_server import ReusePortOSCUDPServer
 
 # Defaults matching edge-node config.h
 FFT_N = 2048
@@ -101,7 +101,7 @@ def main():
         "--host", default="0.0.0.0", help="OSC listen address (default: 0.0.0.0)"
     )
     parser.add_argument(
-        "--port", type=int, default=57120, help="OSC listen port (default: 57120)"
+        "--port", type=int, default=9001, help="OSC listen port (default: 9001)"
     )
     parser.add_argument(
         "--sample-rate",
@@ -121,7 +121,7 @@ def main():
     for node_id in range(NUM_NODES):
         dispatcher.map(f"/shrine/node/{node_id}/fft", _make_fft_handler(node_id))
 
-    server = BlockingOSCUDPServer((args.host, args.port), dispatcher)
+    server = ReusePortOSCUDPServer((args.host, args.port), dispatcher)
     osc_thread = threading.Thread(target=server.serve_forever, daemon=True)
     osc_thread.start()
     print(f"Listening for FFT spectra on {args.host}:{args.port}")

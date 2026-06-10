@@ -5,7 +5,7 @@ import argparse
 from datetime import datetime
 
 from pythonosc.dispatcher import Dispatcher
-from pythonosc.osc_server import BlockingOSCUDPServer
+from leds.osc_server import ReusePortOSCUDPServer
 
 
 def _handler(address, *args):
@@ -18,13 +18,13 @@ def _handler(address, *args):
 def main():
     parser = argparse.ArgumentParser(description="Log incoming OSC messages.")
     parser.add_argument("--host", default="127.0.0.1", help="Listen address")
-    parser.add_argument("--port", type=int, default=57120, help="Listen port")
+    parser.add_argument("--port", type=int, default=9001, help="Listen port")
     args = parser.parse_args()
 
     dispatcher = Dispatcher()
     dispatcher.set_default_handler(_handler)
 
-    server = BlockingOSCUDPServer((args.host, args.port), dispatcher)
+    server = ReusePortOSCUDPServer((args.host, args.port), dispatcher)
     print(f"Listening for OSC on {args.host}:{args.port}")
 
     try:

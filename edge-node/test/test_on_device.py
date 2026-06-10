@@ -6,7 +6,7 @@ OSC UDP packets to verify the full sensing and transmission pipeline works.
 
 Usage:
     python test_on_device.py [--port /dev/ttyACM0] [--baud 115200]
-                             [--osc-port 57120] [--skip-osc]
+                             [--osc-port 9001] [--skip-osc]
 """
 
 import argparse
@@ -19,7 +19,7 @@ import time
 import serial
 import serial.tools.list_ports
 from pythonosc.dispatcher import Dispatcher
-from pythonosc.osc_server import BlockingOSCUDPServer
+from leds.osc_server import ReusePortOSCUDPServer
 
 
 class SerialMonitor:
@@ -94,7 +94,7 @@ class OscListener:
         dispatcher = Dispatcher()
         dispatcher.set_default_handler(self._handler)
 
-        server = BlockingOSCUDPServer(("0.0.0.0", self._osc_port), dispatcher)
+        server = ReusePortOSCUDPServer(("0.0.0.0", self._osc_port), dispatcher)
 
         def _serve():
             server.serve_forever()
@@ -257,7 +257,7 @@ def main():
     parser.add_argument("--port", help="Serial port (default: auto-detect)")
     parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
     parser.add_argument(
-        "--osc-port", type=int, default=57120, help="UDP listen port for OSC (default: 57120)"
+        "--osc-port", type=int, default=9001, help="UDP listen port for OSC (default: 9001)"
     )
     parser.add_argument(
         "--skip-osc", action="store_true", help="Skip OSC validation (for testing without WiFi)"
