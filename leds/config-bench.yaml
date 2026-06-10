@@ -4,3 +4,4 @@ wled_targets:
     color: [255, 40, 0]
 pads: [0]
 update_rate_hz: 10
+wled_timeout: 0.5

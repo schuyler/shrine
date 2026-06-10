@@ -36,9 +36,9 @@ class WledClient:
         try:
             resp = requests.post(url, json=body, timeout=self.timeout)
             resp.raise_for_status()
-        except requests.RequestException:
+        except requests.RequestException as exc:
             if not self._failed:
-                logger.warning("WLED send failed: %s", url)
+                logger.warning("WLED send failed: %s: %s", url, exc)
                 self._failed = True
             return None
 
