@@ -77,9 +77,9 @@ NOMINAL_DT = 1.0 / 30.0  # default tick used when a caller omits dt
 TAU_FAST_PRESENCE = 0.25   # correlation time (s) for capacitive presence noise
 TAU_FAST_GSR = 0.6         # correlation time (s) for GSR coupling noise
 TAU_DRIFT = 10.0           # correlation time (s) for slow baseline drift
-NOISE_FLOOR = 0.012        # fluctuation std at rest (level 0)
-NOISE_GAIN = 0.03          # extra fluctuation std per unit level
-DRIFT_STD = 0.02           # baseline drift std
+NOISE_FLOOR = 0.004        # fluctuation std at rest (level 0)
+NOISE_GAIN = 0.010         # extra fluctuation std per unit level
+DRIFT_STD = 0.008          # baseline drift std
 
 # Heartbeat: in practice skin contact oscillates at the contacting people's
 # pulse. Each node gets a heart rate in [60, 100] bpm; a coupling carries both
@@ -89,7 +89,7 @@ DRIFT_STD = 0.02           # baseline drift std
 HB_BPM_MIN = 60.0
 HB_BPM_MAX = 100.0
 HB_SHARPNESS = 2.5         # waveform peakiness (higher = sharper systolic bump)
-HB_AMP = 0.18              # peak pulse contribution per unit coupling level
+HB_AMP = 0.12              # peak pulse contribution per unit coupling level
 
 
 def _hb_pulse_raw(phase: float) -> float:
