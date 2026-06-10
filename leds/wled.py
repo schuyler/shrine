@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class WledClient:
-    def __init__(self, host: str, port: int = 80, timeout: float = 0.1):
+    def __init__(self, host: str, port: int = 80, timeout: float = 1.0):
         self.host = host
         self.port = port
         self.timeout = timeout
@@ -63,7 +63,7 @@ class WledDispatcher:
     slowest target to keep visual sync tight across all boxes.
     """
 
-    def __init__(self, targets, port=80, timeout=0.1):
+    def __init__(self, targets, port=80, timeout=1.0):
         if not targets:
             raise ValueError("wled_targets must not be empty")
         self._clients = {}

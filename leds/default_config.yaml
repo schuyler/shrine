@@ -14,7 +14,7 @@ wled_targets:
     pad: 3
     color: [40, 255, 0]
 wled_port: 80
-wled_timeout: 0.1
+wled_timeout: 1.0
 update_rate_hz: 30
 pads: [0, 1, 2, 3]
 default_program: "breathe"
