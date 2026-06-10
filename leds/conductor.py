@@ -51,8 +51,10 @@ def _build_shrine_dispatcher(
             pd_client.send_message(address, list(args))
         try:
             node_id = int(address.split("/")[-1])
-            if len(args) >= 5:
+            if 0 <= node_id < 4 and len(args) >= 5:
                 sensor_state.update_node(node_id, *[float(a) for a in args[:5]])
+            else:
+                logger.debug("Out-of-range/short node message: %s %s", address, args)
         except (ValueError, IndexError):
             logger.debug("Malformed node message: %s %s", address, args)
 

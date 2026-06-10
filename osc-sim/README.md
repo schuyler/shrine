@@ -24,8 +24,8 @@ node (a "user"), both keeping the dialed-in levels so you can simulate people
 touching and letting go without re-posing.
 
 ```bash
-uv run python osc-sim/manual.py --host localhost          # single target
-uv run python osc-sim/manual.py --targets 255.255.255.255:57120 255.255.255.255:9000
+uv run python osc-sim/manual.py --host localhost              # single target (conductor :9001)
+uv run python osc-sim/manual.py --targets 255.255.255.255:9001  # broadcast to the conductor
 ```
 
 Controls (also shown in the footer):

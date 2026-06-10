@@ -611,7 +611,7 @@ def main():
         "--targets",
         nargs="+",
         metavar="HOST:PORT",
-        help="Send to multiple targets (e.g., 255.255.255.255:57120 255.255.255.255:9000). "
+        help="Send to multiple targets (e.g., 255.255.255.255:9001). "
              "Overrides --host/--port. Uses broadcast UDP.",
     )
     args = parser.parse_args()

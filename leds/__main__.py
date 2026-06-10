@@ -4,10 +4,11 @@ import logging
 import threading
 import time
 
+from pythonosc.osc_server import BlockingOSCUDPServer
+
 from leds.clock import Clock
 from leds.config import load_config
 from leds.osc_input import build_dispatcher
-from leds.osc_server import ReusePortOSCUDPServer
 from leds.pad_state import PadState
 from leds.palettes import load_palettes
 from leds.programs import get_program
@@ -58,7 +59,10 @@ def main():
     current_palette_name = config["default_palette"]
     palette = palettes.get(current_palette_name, palettes.get("default"))
 
-    server = ReusePortOSCUDPServer(
+    # Plain blocking server: this port receives the conductor's unicast /leds/*
+    # control stream, so it wants neither SO_BROADCAST nor SO_REUSEPORT (which
+    # would load-balance unicast across any second binder and silently drop it).
+    server = BlockingOSCUDPServer(
         (config["osc_listen_host"], config["osc_listen_port"]), dispatcher)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()

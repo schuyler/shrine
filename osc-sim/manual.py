@@ -18,7 +18,7 @@ The control model matches the physical reality the receiver reconstructs:
 
 Usage:
     python osc-sim/manual.py [--host HOST] [--port PORT] [--rate HZ]
-    python osc-sim/manual.py --targets 255.255.255.255:57120 ...
+    python osc-sim/manual.py --targets 255.255.255.255:9001 ...
 
 Controls (shown in the footer at all times):
     arrows / hjkl   move the cursor between channels
