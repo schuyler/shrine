@@ -14,7 +14,8 @@ dependencies = [
     "requests",
     "sounddevice",
     "esptool",
-    "esp-idf-nvs-partition-gen"
+    "esp-idf-nvs-partition-gen",
+    "watchdog",
 ]
 
 [dependency-groups]

@@ -39,7 +39,28 @@ buckets:
   ascending:
     dwell: 60.0           # fixed dwell before decaying to Energizing
 
+tempo:
+  quiet: 50
+  seeking: [60, 70]
+  aligning: [70, 80]
+  energizing: [80, 90]
+  ascending: 100
+
 idle:
   # Global idle bucket: fills while 0 pads engaged, forces Quiet at timeout
   timeout: 180.0
   drain_rate: 1.0         # drains at 1:1 while any pad is engaged
+
+programs:
+  quiet: "breathe"
+  seeking: "pulse"
+  aligning: "converge"
+  energizing: "converge"
+  ascending: "bloom"
+
+palettes:
+  quiet: "default"
+  seeking: "default"
+  aligning: "default"
+  energizing: "default"
+  ascending: "ascending"

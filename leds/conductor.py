@@ -8,32 +8,102 @@ import argparse
 import logging
 import threading
 import time
+from pathlib import Path
 
+import yaml
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.udp_client import SimpleUDPClient
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
-from leds.conductor_config import load_conductor_config
+from leds.conductor_config import (
+    load_conductor_config,
+    validate_state_mappings,
+    validate_tempo_config,
+)
 from leds.osc_server import ReusePortOSCUDPServer
 from leds.sensor_state import SensorState
 from leds.state_machine import GroupChangedEvent, State, StateMachine, StateChangedEvent
 
 logger = logging.getLogger(__name__)
 
-# Program and palette names to send to the LED stack on each state transition.
-_STATE_PROGRAMS: dict[State, str] = {
-    State.QUIET: "breathe",
-    State.SEEKING: "pulse",
-    State.ALIGNING: "converge",
-    State.ENERGIZING: "converge",
-    State.ASCENDING: "bloom",
-}
-_STATE_PALETTES: dict[State, str] = {
-    State.QUIET: "default",
-    State.SEEKING: "default",
-    State.ALIGNING: "default",
-    State.ENERGIZING: "default",
-    State.ASCENDING: "ascending",
-}
+# ---------------------------------------------------------------------------
+# Config-driven program/palette mappings (hot-reloadable)
+# ---------------------------------------------------------------------------
+
+_mappings_lock = threading.Lock()
+_programs: dict[str, str] = {}
+_palettes: dict[str, str] = {}
+
+
+def _get_mappings() -> tuple[dict[str, str], dict[str, str]]:
+    with _mappings_lock:
+        return _programs, _palettes
+
+
+def _set_mappings(programs: dict[str, str], palettes: dict[str, str]) -> None:
+    # IMPORTANT: Replace module-level references, never mutate dicts in place.
+    # This invariant is what makes _get_mappings safe to return references
+    # without copying — callers hold a reference to an immutable-in-practice
+    # dict that will never be modified, only replaced wholesale.
+    global _programs, _palettes
+    with _mappings_lock:
+        _programs = programs
+        _palettes = palettes
+
+
+class _ConfigReloadHandler(FileSystemEventHandler):
+    """Watchdog event handler that hot-reloads programs/palettes from conductor.yaml."""
+
+    def __init__(self, config_path: Path, led_client, current_state_ref):
+        super().__init__()
+        self._config_path = config_path.resolve()
+        self._led_client = led_client
+        self._current_state_ref = current_state_ref  # callable returning State
+        self._last_reload: float = 0.0
+
+    def on_any_event(self, event):
+        # Covers modified, created, and moved (atomic rename).
+        # Many editors (vim, neovim, GUI editors) save via atomic rename
+        # (write temp + rename), which fires MOVED_TO, not MODIFIED.
+        # Filtering on on_any_event with a path check handles all cases.
+        src = Path(event.src_path).resolve()
+        dest = (
+            Path(event.dest_path).resolve()
+            if hasattr(event, "dest_path") and event.dest_path
+            else None
+        )
+        if src != self._config_path and dest != self._config_path:
+            return
+        now = time.monotonic()
+        if now - self._last_reload < 0.5:
+            return
+        self._reload()
+
+    def _reload(self):
+        try:
+            with open(self._config_path, encoding="utf-8") as f:
+                raw = yaml.safe_load(f) or {}
+            programs, palettes = validate_state_mappings(raw)
+        except Exception:
+            logger.warning(
+                "Config reload failed; keeping previous mappings",
+                exc_info=True,
+            )
+            return
+
+        _set_mappings(programs, palettes)
+        # Update debounce timestamp only on success. If reload fails (bad
+        # YAML, missing keys), the next event is NOT suppressed — so a quick
+        # correction by the user is picked up immediately.
+        self._last_reload = time.monotonic()
+        logger.info("Reloaded conductor config mappings")
+
+        # Re-send current state's program/palette to LED stack.
+        state = self._current_state_ref()
+        name = state.name.lower()
+        self._led_client.send_message("/leds/program", programs[name])
+        self._led_client.send_message("/leds/palette", palettes[name])
 
 
 def _build_shrine_dispatcher(
@@ -85,10 +155,20 @@ def main() -> None:
 
     logging.basicConfig(level=getattr(logging, args.log_level))
 
-    config = load_conductor_config(args.conductor_config)
+    config_path = (
+        Path(args.conductor_config).resolve()
+        if args.conductor_config
+        else (Path(__file__).parent.parent / "conductor.yaml").resolve()
+    )
+
+    config = load_conductor_config(config_path)
     sensing_cfg = config["sensing"]
     buckets_cfg = config["buckets"]
     idle_cfg = config["idle"]
+
+    # Validate and install initial mappings (fatal on failure).
+    programs_init, palettes_init = validate_state_mappings(config)
+    _set_mappings(programs_init, palettes_init)
 
     sensor_state = SensorState(sensing_cfg)
     fsm = StateMachine(
@@ -100,14 +180,31 @@ def main() -> None:
     led_client = SimpleUDPClient(args.led_host, args.led_port)
     pd_client = SimpleUDPClient(args.pd_host, args.pd_port)
 
+    # Start watchdog observer for hot-reload of programs/palettes.
+    # current_state is captured by name via the lambda closure — each call
+    # re-evaluates the name, picking up reassignments in the tick loop.
+    # Safe under CPython: State is immutable, GIL makes single ref read/write atomic.
+    current_state = State.QUIET
+    reload_handler = _ConfigReloadHandler(
+        config_path, led_client, lambda: current_state
+    )
+    observer = Observer()
+    observer.schedule(reload_handler, str(config_path.parent), recursive=False)
+    observer.daemon = True
+    observer.start()
+
     dispatcher = _build_shrine_dispatcher(sensor_state, pd_client)
     server = ReusePortOSCUDPServer((args.listen_host, args.listen_port), dispatcher)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
 
+    # Tempo config is validated at startup (fatal) but NOT hot-reloaded.
+    # Editing the tempo section in conductor.yaml requires a restart.
+    tempo_cfg = validate_tempo_config(config)
+    last_tempo_send = 0.0
+
     tick_interval = 1.0 / args.tick_rate
     last = time.monotonic()
-    current_state = State.QUIET
 
     logger.info(
         "Conductor running. Listening on %s:%d → LED %s:%d, Pd %s:%d",
@@ -131,8 +228,9 @@ def main() -> None:
                     current_state = event.new
                     name = event.new.name.lower()
                     logger.info("State: %s → %s", event.old.name, event.new.name)
-                    led_client.send_message("/leds/program", _STATE_PROGRAMS[event.new])
-                    led_client.send_message("/leds/palette", _STATE_PALETTES[event.new])
+                    programs, palettes = _get_mappings()
+                    led_client.send_message("/leds/program", programs[name])
+                    led_client.send_message("/leds/palette", palettes[name])
                     pd_client.send_message("/shrine/cue/state", name)
 
                 elif isinstance(event, GroupChangedEvent):
@@ -140,6 +238,13 @@ def main() -> None:
                     logger.debug("Group: %s", members)
                     led_client.send_message("/leds/group", members or [])
                     pd_client.send_message("/shrine/cue/group", members or [])
+
+            # Send tempo at ~1 Hz.
+            if now - last_tempo_send >= 1.0:
+                bpm = fsm.tempo(tempo_cfg)
+                led_client.send_message("/leds/tempo", bpm)
+                pd_client.send_message("/shrine/cue/tempo", bpm)
+                last_tempo_send = now
 
             # Relay continuous cap presence to LED stack.
             for pad, val in enumerate(snapshot.raw_cap):
@@ -152,6 +257,8 @@ def main() -> None:
 
     finally:
         server.shutdown()
+        observer.stop()
+        observer.join()
 
 
 if __name__ == "__main__":
