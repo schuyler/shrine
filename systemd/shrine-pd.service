@@ -1,0 +1,20 @@
+[Unit]
+Description=Shrine Pure Data sound engine
+After=graphical.target sound.target
+Wants=sound.target
+
+[Service]
+Type=simple
+User=sderle
+EnvironmentFile=/home/sderle/shrine/systemd/shrine.env
+Environment=DISPLAY=:1
+Environment=XAUTHORITY=/home/sderle/.Xauthority
+ExecStart=/usr/bin/pd -rt -audioapi alsa -r 48000 -outchannels 4 \
+    -audiooutdev ${PD_AUDIO_OUTDEV} \
+    -path /home/sderle/shrine/pd \
+    /home/sderle/shrine/pd/main.pd
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

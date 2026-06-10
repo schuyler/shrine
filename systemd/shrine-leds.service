@@ -1,0 +1,15 @@
+[Unit]
+Description=Shrine LED renderer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sderle
+WorkingDirectory=/home/sderle/shrine
+ExecStart=/home/sderle/shrine/.venv/bin/python -m leds
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
