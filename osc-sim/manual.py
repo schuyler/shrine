@@ -5,9 +5,16 @@ Unlike ``generator.py``, which plays an automated scenario, this tool puts
 every channel under direct keyboard control. It mirrors the firmware's actual
 OSC output exactly: for each of the four nodes it streams ``/shrine/node/N``
 with five floats — ``self_stdev``, ``self_carrier_mag`` and three ``gsr_mag``
-cross-couplings (see edge-node/README.md, "OSC Output"). Every one of those 20
-floats is an independent slider, so you can pose any sensor state by hand and
-hold it for as long as you like.
+cross-couplings (see edge-node/README.md, "OSC Output").
+
+The control model matches the physical reality the receiver reconstructs:
+
+* Each node has its own **presence** (``stdev``, ``carrier``) — independent.
+* Each unordered **pair** of nodes shares one **coupling** (GSR) value. The
+  firmware reports that pair from *both* nodes' slots, so the simulator drives
+  it from a single source and writes it to both slots — keeping the two sides
+  symmetric (set one, both move). A released user's couplings drop to zero on
+  both sides.
 
 Usage:
     python osc-sim/manual.py [--host HOST] [--port PORT] [--rate HZ]
@@ -21,8 +28,8 @@ Controls (shown in the footer at all times):
     0-9             set selected channel to 0.0 .. 0.9
     space           set selected channel to 1.0
     x               mute / unmute the selected channel (keeps its level)
-    t               touch / release the selected node (mute all its channels)
-    n / m           zero / max the whole selected node
+    t               touch / release the selected node (its presence + couplings)
+    n / m           zero / max the selected node (presence + its couplings)
     z / f           zero / fill every channel
     s               toggle smoothing (eased vs. instant)
     J               toggle organic jitter
@@ -36,27 +43,29 @@ import time
 
 from pythonosc.udp_client import SimpleUDPClient
 
-# Reuse the broadcast client and noise generator from the automated simulator
-# so both tools share a single source of truth for those behaviours.
+# Reuse the broadcast client and noise generator from the automated simulator,
+# and the canonical pair layout from the receiver, so everything shares one
+# source of truth for those behaviours.
 from generator import BroadcastUDPClient, layered_noise
+from leds.sensor_state import GSR_PAIRS as NODE_PAIRS, NODE_GSR_MAPPING
 
 NUM_NODES = 4
 
-# Per-node OSC floats, in the exact order the firmware sends them.
-# (label shown in the UI, short tag used in status text)
-NODE_CHANNELS = (
-    ("stdev", "stdev"),
-    ("carrier", "carr"),
-    ("gsr0", "gsr0"),
-    ("gsr1", "gsr1"),
-    ("gsr2", "gsr2"),
-)
-NUM_CHANNELS = len(NODE_CHANNELS)
+# Per-node presence floats, in the order the firmware sends them.
+PRESENCE_LABELS = ("stdev", "carrier")
+NUM_PRESENCE = len(PRESENCE_LABELS)
+
+NUM_PAIRS = len(NODE_PAIRS)  # 6 unordered node pairs
 
 STEP = 0.05          # coarse adjust per keypress
 FINE_STEP = 0.01     # fine adjust per keypress
 SMOOTHING_RATE = 0.2  # per-tick easing toward target when smoothing is on
 BAR_WIDTH = 8        # filled-bar width in characters
+
+# Per-channel jitter phase offsets. Pairs are keyed by pair index (not by node)
+# so both nodes reporting a pair get identical jitter and stay symmetric.
+_PRESENCE_OFFSET = 1.1
+_PAIR_OFFSET_BASE = 100.0
 
 
 def _clamp(v: float) -> float:
@@ -64,94 +73,152 @@ def _clamp(v: float) -> float:
 
 
 class ManualState:
-    """The 20-channel grid the user drives, independent of any UI.
+    """The channels the user drives, independent of any UI.
 
-    Each channel tracks a ``target`` (what the user dialled in) and a
-    ``current`` value that is sent over OSC. With smoothing enabled, ``current``
-    eases toward ``target`` each tick; otherwise it snaps immediately. Optional
-    jitter layers organic noise on top of the sent value without disturbing the
-    target, so the held pose is preserved.
+    Presence channels (4 nodes × {stdev, carrier}) and pair couplings (6) each
+    track a ``target`` (what the user dialled in) and a ``current`` value that is
+    sent over OSC. With smoothing enabled, ``current`` eases toward ``target``
+    each tick; otherwise it snaps. Mute is a non-destructive layer: a muted
+    channel sends 0.0 but keeps its target. Releasing a node ("touch/release")
+    suppresses its presence and every coupling it participates in.
     """
 
     def __init__(self, smoothing: bool = True, jitter: bool = False):
-        # Row-major grids indexed [node][channel].
-        self.target = [[0.0] * NUM_CHANNELS for _ in range(NUM_NODES)]
-        self.current = [[0.0] * NUM_CHANNELS for _ in range(NUM_NODES)]
-        # Mute is a non-destructive layer: a muted channel sends 0.0 but keeps
-        # its target, so "release" then "touch" restores the held pose.
-        self.muted = [[False] * NUM_CHANNELS for _ in range(NUM_NODES)]
+        self.pres_target = [[0.0] * NUM_PRESENCE for _ in range(NUM_NODES)]
+        self.pres_current = [[0.0] * NUM_PRESENCE for _ in range(NUM_NODES)]
+        self.pres_muted = [[False] * NUM_PRESENCE for _ in range(NUM_NODES)]
+        self.pair_target = [0.0] * NUM_PAIRS
+        self.pair_current = [0.0] * NUM_PAIRS
+        self.pair_muted = [False] * NUM_PAIRS
+        self.released = [False] * NUM_NODES
         self.smoothing = smoothing
         self.jitter = jitter
 
-    def set(self, node: int, ch: int, value: float) -> None:
-        self.target[node][ch] = _clamp(value)
+    # ---- channel addressing -------------------------------------------------
+    # A channel key is ("pres", node, idx) or ("pair", pair_idx). The ordered
+    # list below is what the views navigate and render.
 
-    def adjust(self, node: int, ch: int, delta: float) -> None:
-        self.set(node, ch, self.target[node][ch] + delta)
+    @staticmethod
+    def channels() -> list:
+        chans = []
+        for n in range(NUM_NODES):
+            for i in range(NUM_PRESENCE):
+                chans.append(("pres", n, i))
+        for p in range(NUM_PAIRS):
+            chans.append(("pair", p))
+        return chans
+
+    def label(self, ch) -> str:
+        if ch[0] == "pres":
+            return f"n{ch[1]} {PRESENCE_LABELS[ch[2]]}"
+        a, b = NODE_PAIRS[ch[1]]
+        return f"{a}-{b}"
+
+    def target(self, ch) -> float:
+        return self.pres_target[ch[1]][ch[2]] if ch[0] == "pres" else self.pair_target[ch[1]]
+
+    def current(self, ch) -> float:
+        return self.pres_current[ch[1]][ch[2]] if ch[0] == "pres" else self.pair_current[ch[1]]
+
+    def muted(self, ch) -> bool:
+        return self.pres_muted[ch[1]][ch[2]] if ch[0] == "pres" else self.pair_muted[ch[1]]
+
+    def set(self, ch, value: float) -> None:
+        value = _clamp(value)
+        if ch[0] == "pres":
+            self.pres_target[ch[1]][ch[2]] = value
+        else:
+            self.pair_target[ch[1]] = value
+
+    def adjust(self, ch, delta: float) -> None:
+        self.set(ch, self.target(ch) + delta)
+
+    def toggle_mute(self, ch) -> None:
+        if ch[0] == "pres":
+            self.pres_muted[ch[1]][ch[2]] = not self.pres_muted[ch[1]][ch[2]]
+        else:
+            self.pair_muted[ch[1]] = not self.pair_muted[ch[1]]
+
+    # ---- node-level helpers -------------------------------------------------
+
+    def toggle_touch(self, node: int) -> None:
+        """Touch or release a whole user (its presence and all its couplings)."""
+        self.released[node] = not self.released[node]
+
+    def node_released(self, node: int) -> bool:
+        return self.released[node]
+
+    def set_node(self, node: int, value: float) -> None:
+        """Set a node's presence and every coupling it participates in."""
+        value = _clamp(value)
+        for i in range(NUM_PRESENCE):
+            self.pres_target[node][i] = value
+        for p, (a, b) in enumerate(NODE_PAIRS):
+            if node in (a, b):
+                self.pair_target[p] = value
 
     def zero_all(self) -> None:
         for n in range(NUM_NODES):
-            for c in range(NUM_CHANNELS):
-                self.target[n][c] = 0.0
+            for i in range(NUM_PRESENCE):
+                self.pres_target[n][i] = 0.0
+        for p in range(NUM_PAIRS):
+            self.pair_target[p] = 0.0
 
     def fill_all(self) -> None:
         for n in range(NUM_NODES):
-            for c in range(NUM_CHANNELS):
-                self.target[n][c] = 1.0
+            for i in range(NUM_PRESENCE):
+                self.pres_target[n][i] = 1.0
+        for p in range(NUM_PAIRS):
+            self.pair_target[p] = 1.0
 
-    def set_node(self, node: int, value: float) -> None:
-        for c in range(NUM_CHANNELS):
-            self.target[node][c] = _clamp(value)
+    # ---- per-tick advance + OSC ---------------------------------------------
 
-    def toggle_mute(self, node: int, ch: int) -> None:
-        self.muted[node][ch] = not self.muted[node][ch]
-
-    def node_released(self, node: int) -> bool:
-        """True when every channel of a node is muted (the user has let go)."""
-        return all(self.muted[node])
-
-    def toggle_touch(self, node: int) -> None:
-        """Touch or release a whole user: unmute all if released, else mute all."""
-        release = not self.node_released(node)
-        for c in range(NUM_CHANNELS):
-            self.muted[node][c] = release
+    def _ease(self, current: float, target: float) -> float:
+        if not self.smoothing:
+            return target
+        return current + SMOOTHING_RATE * (target - current)
 
     def update(self) -> None:
-        """Advance every channel one tick toward its target."""
         for n in range(NUM_NODES):
-            for c in range(NUM_CHANNELS):
-                if self.smoothing:
-                    cur = self.current[n][c]
-                    self.current[n][c] = cur + SMOOTHING_RATE * (self.target[n][c] - cur)
-                else:
-                    self.current[n][c] = self.target[n][c]
+            for i in range(NUM_PRESENCE):
+                self.pres_current[n][i] = self._ease(self.pres_current[n][i], self.pres_target[n][i])
+        for p in range(NUM_PAIRS):
+            self.pair_current[p] = self._ease(self.pair_current[p], self.pair_target[p])
 
     def payloads(self, t: float) -> dict:
         """Build the OSC payload for each node from the current values.
 
-        Args:
-            t: Current time in seconds, used for jitter when enabled.
-
-        Returns:
-            Dict mapping ``/shrine/node/N`` to its list of five floats.
+        Each node's three GSR slots are filled from the shared pair values via
+        NODE_GSR_MAPPING, so both nodes of a pair always report the same number.
         """
         sent = {}
         for n in range(NUM_NODES):
             args = []
-            for c in range(NUM_CHANNELS):
-                if self.muted[n][c]:
+            for i in range(NUM_PRESENCE):
+                if self.released[n] or self.pres_muted[n][i]:
                     args.append(0.0)
                     continue
-                v = self.current[n][c]
+                v = self.pres_current[n][i]
                 if self.jitter:
-                    # Decorrelate channels with a per-cell phase offset.
-                    v += layered_noise(t, (n * NUM_CHANNELS + c) * 1.1)
+                    v += layered_noise(t, (n * NUM_PRESENCE + i) * _PRESENCE_OFFSET)
                 args.append(_clamp(v))
+
+            for slot in range(3):
+                p = NODE_GSR_MAPPING[n][slot]
+                a, b = NODE_PAIRS[p]
+                if self.pair_muted[p] or self.released[a] or self.released[b]:
+                    args.append(0.0)
+                    continue
+                v = self.pair_current[p]
+                if self.jitter:
+                    # Keyed by pair, not node, so both sides jitter identically.
+                    v += layered_noise(t, (_PAIR_OFFSET_BASE + p) * _PRESENCE_OFFSET)
+                args.append(_clamp(v))
+
             sent[f"/shrine/node/{n}"] = args
         return sent
 
     def send(self, clients: list, t: float) -> dict:
-        """Send the current payload to every client and return what was sent."""
         sent = self.payloads(t)
         for address, args in sent.items():
             for client in clients:
@@ -163,13 +230,31 @@ class ManualState:
 # Curses TUI
 # ---------------------------------------------------------------------------
 
-LABEL_W = 9   # left-hand channel-label column
-CELL_W = 16   # per-node column: "[████░░░░] 0.55 "
+LABEL_W = 9    # left-hand row-label column
+CELL_W = 16    # per-node / per-pair value column: "[████░░░░] 0.55 "
+PAIR_LABEL_W = 5
+PAIR_COLS = 3  # couplings laid out in a 2×3 grid
 
 
-def _draw(stdscr, state: ManualState, sel_node: int, sel_ch: int, header: str):
+def _fmt_cell(current: float, target: float, muted: bool) -> str:
+    filled = round(_clamp(current) * BAR_WIDTH)
+    bar = "█" * filled + "░" * (BAR_WIDTH - filled)
+    return f"[{bar}] {'mute' if muted else f'{target:.2f}'}"
+
+
+def _cell_attr(is_sel: bool, dimmed: bool):
+    if is_sel:
+        return curses.A_REVERSE
+    if dimmed:
+        return curses.A_DIM
+    return curses.A_NORMAL
+
+
+def _draw(stdscr, state: ManualState, sel: int, header: str):
     stdscr.erase()
     max_rows, max_cols = stdscr.getmaxyx()
+    channels = state.channels()
+    sel_ch = channels[sel]
 
     def put(row, col, text, attr=curses.A_NORMAL):
         if row >= max_rows or col >= max_cols:
@@ -180,68 +265,54 @@ def _draw(stdscr, state: ManualState, sel_node: int, sel_ch: int, header: str):
             pass
 
     put(0, 0, header, curses.A_BOLD)
+    put(1, 0, f"smoothing:{'on' if state.smoothing else 'off'}  "
+             f"jitter:{'on' if state.jitter else 'off'}", curses.A_DIM)
 
-    flags = f"smoothing:{'on' if state.smoothing else 'off'}  jitter:{'on' if state.jitter else 'off'}"
-    put(1, 0, flags, curses.A_DIM)
-
-    # Node header row.
-    node_row = 3
+    # --- Presence block ---
+    base = 3
     for n in range(NUM_NODES):
         col = LABEL_W + n * CELL_W
-        attr = curses.A_BOLD | (curses.A_REVERSE if n == sel_node else 0)
-        label = f"node{n} rel" if state.node_released(n) else f"node{n}"
-        put(node_row, col, label.center(CELL_W - 1), attr)
-
-    # Channel rows.
-    for c, (label, _tag) in enumerate(NODE_CHANNELS):
-        row = node_row + 1 + c
-        put(row, 0, label.rjust(LABEL_W - 1))
+        label = f"node{n} REL" if state.released[n] else f"node{n}"
+        put(base, col, label.center(CELL_W - 1), curses.A_BOLD)
+    for i in range(NUM_PRESENCE):
+        row = base + 1 + i
+        put(row, 0, PRESENCE_LABELS[i].rjust(LABEL_W - 1))
         for n in range(NUM_NODES):
             col = LABEL_W + n * CELL_W
-            val = _clamp(state.current[n][c])
-            filled = round(val * BAR_WIDTH)
-            bar = "█" * filled + "░" * (BAR_WIDTH - filled)
-            muted = state.muted[n][c]
-            is_sel = (n == sel_node and c == sel_ch)
-            # Muted cells show the held level greyed out with a "mute" tag, so
-            # the dialed-in pose stays visible while output is suppressed.
-            cell = f"[{bar}] {'mute' if muted else f'{state.target[n][c]:.2f}'}"
-            if is_sel:
-                attr = curses.A_REVERSE
-            elif muted:
-                attr = curses.A_DIM
-            else:
-                attr = curses.A_NORMAL
-            put(row, col, cell, attr)
+            ch = ("pres", n, i)
+            muted = state.pres_muted[n][i]
+            dimmed = muted or state.released[n]
+            cell = _fmt_cell(state.pres_current[n][i], state.pres_target[n][i], muted)
+            put(row, col, cell, _cell_attr(ch == sel_ch, dimmed))
 
-    # Status + help.
-    status_row = node_row + 1 + NUM_CHANNELS + 1
-    sel_label = NODE_CHANNELS[sel_ch][0]
-    sel_state = "muted" if state.muted[sel_node][sel_ch] else f"{state.target[sel_node][sel_ch]:.2f}"
-    put(
-        status_row,
-        0,
-        f"selected: node{sel_node} / {sel_label} = {sel_state}   step {STEP:.2f}",
-        curses.A_BOLD,
-    )
-    put(
-        status_row + 2,
-        0,
+    # --- Couplings block ---
+    cbase = base + 1 + NUM_PRESENCE + 1
+    put(cbase, 0, "COUPLINGS (gsr pairs)", curses.A_BOLD)
+    for p in range(NUM_PAIRS):
+        r, c = divmod(p, PAIR_COLS)
+        row = cbase + 1 + r
+        col = c * (PAIR_LABEL_W + CELL_W)
+        a, b = NODE_PAIRS[p]
+        put(row, col, f"{a}-{b}".rjust(PAIR_LABEL_W - 1))
+        ch = ("pair", p)
+        muted = state.pair_muted[p]
+        dimmed = muted or state.released[a] or state.released[b]
+        cell = _fmt_cell(state.pair_current[p], state.pair_target[p], muted)
+        put(row, col + PAIR_LABEL_W, cell, _cell_attr(ch == sel_ch, dimmed))
+
+    # --- Status + help ---
+    status_row = cbase + 1 + (NUM_PAIRS + PAIR_COLS - 1) // PAIR_COLS + 1
+    sel_state = "muted" if state.muted(sel_ch) else f"{state.target(sel_ch):.2f}"
+    put(status_row, 0,
+        f"selected: {state.label(sel_ch)} = {sel_state}   step {STEP:.2f}",
+        curses.A_BOLD)
+    put(status_row + 2, 0,
         "arrows/hjkl move  +/- adjust  ]/[ fine  0-9 set  space=1.0",
-        curses.A_DIM,
-    )
-    put(
-        status_row + 3,
-        0,
-        "x mute chan  t touch/release node  n/m zero/max node  z/f zero/fill all",
-        curses.A_DIM,
-    )
-    put(
-        status_row + 4,
-        0,
-        "s smooth  J jitter  q quit",
-        curses.A_DIM,
-    )
+        curses.A_DIM)
+    put(status_row + 3, 0,
+        "x mute  t touch/release node  n/m zero/max node  z/f zero/fill all",
+        curses.A_DIM)
+    put(status_row + 4, 0, "s smooth  J jitter  q quit", curses.A_DIM)
 
     stdscr.refresh()
 
@@ -252,8 +323,9 @@ def _loop(stdscr, clients: list, rate: float, smoothing: bool, jitter: bool):
     curses.noecho()
 
     state = ManualState(smoothing=smoothing, jitter=jitter)
-    sel_node = 0
-    sel_ch = 0
+    channels = state.channels()
+    n_channels = len(channels)
+    sel = 0
 
     targets_str = ", ".join(f"{c._address}:{c._port}" for c in clients)
     header = f"Manual Sensor Simulator   OSC -> {targets_str}  @ {rate:g} Hz"
@@ -270,36 +342,36 @@ def _loop(stdscr, clients: list, rate: float, smoothing: bool, jitter: bool):
         except curses.error:
             key = -1
 
-        if key in (ord("q"), 27):  # q or ESC
+        sel_ch = channels[sel]
+        if key in (ord("q"), 27):
             break
-        elif key in (curses.KEY_LEFT, ord("h")):
-            sel_node = (sel_node - 1) % NUM_NODES
-        elif key in (curses.KEY_RIGHT, ord("l")):
-            sel_node = (sel_node + 1) % NUM_NODES
-        elif key in (curses.KEY_UP, ord("k")):
-            sel_ch = (sel_ch - 1) % NUM_CHANNELS
-        elif key in (curses.KEY_DOWN, ord("j")):
-            sel_ch = (sel_ch + 1) % NUM_CHANNELS
+        elif key in (curses.KEY_LEFT, ord("h"), curses.KEY_UP, ord("k")):
+            sel = (sel - 1) % n_channels
+        elif key in (curses.KEY_RIGHT, ord("l"), curses.KEY_DOWN, ord("j")):
+            sel = (sel + 1) % n_channels
         elif key in (ord("+"), ord("=")):
-            state.adjust(sel_node, sel_ch, STEP)
+            state.adjust(sel_ch, STEP)
         elif key in (ord("-"), ord("_")):
-            state.adjust(sel_node, sel_ch, -STEP)
+            state.adjust(sel_ch, -STEP)
         elif key == ord("]"):
-            state.adjust(sel_node, sel_ch, FINE_STEP)
+            state.adjust(sel_ch, FINE_STEP)
         elif key == ord("["):
-            state.adjust(sel_node, sel_ch, -FINE_STEP)
+            state.adjust(sel_ch, -FINE_STEP)
         elif key == ord(" "):
-            state.set(sel_node, sel_ch, 1.0)
+            state.set(sel_ch, 1.0)
         elif ord("0") <= key <= ord("9"):
-            state.set(sel_node, sel_ch, (key - ord("0")) / 10.0)
+            state.set(sel_ch, (key - ord("0")) / 10.0)
         elif key == ord("x"):
-            state.toggle_mute(sel_node, sel_ch)
+            state.toggle_mute(sel_ch)
         elif key == ord("t"):
-            state.toggle_touch(sel_node)
+            if sel_ch[0] == "pres":
+                state.toggle_touch(sel_ch[1])
         elif key == ord("n"):
-            state.set_node(sel_node, 0.0)
+            if sel_ch[0] == "pres":
+                state.set_node(sel_ch[1], 0.0)
         elif key == ord("m"):
-            state.set_node(sel_node, 1.0)
+            if sel_ch[0] == "pres":
+                state.set_node(sel_ch[1], 1.0)
         elif key == ord("z"):
             state.zero_all()
         elif key == ord("f"):
@@ -311,7 +383,7 @@ def _loop(stdscr, clients: list, rate: float, smoothing: bool, jitter: bool):
 
         state.update()
         state.send(clients, t)
-        _draw(stdscr, state, sel_node, sel_ch, header)
+        _draw(stdscr, state, sel, header)
 
         elapsed = time.monotonic() - now
         sleep_time = tick - elapsed
@@ -355,9 +427,7 @@ def main():
     args = parser.parse_args()
 
     clients = build_clients(args)
-    curses.wrapper(
-        _loop, clients, args.rate, not args.no_smoothing, args.jitter
-    )
+    curses.wrapper(_loop, clients, args.rate, not args.no_smoothing, args.jitter)
     sys.exit(0)
 
 

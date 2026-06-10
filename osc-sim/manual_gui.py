@@ -2,10 +2,10 @@
 """Qt desktop front-end for the manual OSC sensor simulator.
 
 This is a second view over the same ``ManualState`` that drives the curses tool
-in ``manual.py`` — all OSC, smoothing, jitter and mute logic is shared, so the
-two stay in lockstep. It presents the four nodes as columns of vertical faders
-(one per OSC float) with per-channel mute and per-node touch/release buttons,
-matching the firmware contract exactly (``/shrine/node/N`` × 5 floats).
+in ``manual.py`` — all OSC, smoothing, jitter, mute and pair-symmetry logic is
+shared. Each node is a column with its presence faders (``stdev``, ``carrier``)
+and a touch/release button; the six GSR couplings sit in a row below, one fader
+per node pair (so setting a coupling moves both nodes' reports together).
 
 Install the GUI dependency, then run:
 
@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -37,9 +36,10 @@ from PySide6.QtWidgets import (
 
 from manual import (
     FINE_STEP,
-    NODE_CHANNELS,
-    NUM_CHANNELS,
+    NODE_PAIRS,
     NUM_NODES,
+    NUM_PRESENCE,
+    PRESENCE_LABELS,
     STEP,
     ManualState,
     build_clients,
@@ -49,17 +49,15 @@ SLIDER_RANGE = 100  # QSlider is integer; map 0..100 <-> 0.0..1.0
 
 
 class ChannelStrip(QFrame):
-    """A single fader: vertical slider + live value label + mute button.
+    """A single fader for one channel key: slider + live value + mute button.
 
     The slider position is the *target*; the label shows the *current* (eased,
-    optionally jittered) value actually being sent — mirroring the curses tool's
-    "bar = current, number = target" convention.
+    optionally jittered) value actually being sent.
     """
 
-    def __init__(self, state: ManualState, node: int, ch: int):
+    def __init__(self, state: ManualState, ch, title: str):
         super().__init__()
         self.state = state
-        self.node = node
         self.ch = ch
         self._selected = False
         self.setObjectName("ChannelStrip")
@@ -74,8 +72,6 @@ class ChannelStrip(QFrame):
         self.slider = QSlider(Qt.Vertical)
         self.slider.setRange(0, SLIDER_RANGE)
         self.slider.setValue(0)
-        # Keyboard is driven from the window, not individual sliders, so the
-        # selection cursor and arrow-key navigation stay consistent.
         self.slider.setFocusPolicy(Qt.NoFocus)
         self.slider.valueChanged.connect(self._on_slider)
 
@@ -85,13 +81,20 @@ class ChannelStrip(QFrame):
         self.mute_btn.setFocusPolicy(Qt.NoFocus)
         self.mute_btn.clicked.connect(self._on_mute)
 
-        name_label = QLabel(NODE_CHANNELS[ch][0])
+        name_label = QLabel(title)
         name_label.setAlignment(Qt.AlignHCenter)
 
         layout.addWidget(self.value_label)
         layout.addWidget(self.slider, 1, Qt.AlignHCenter)
         layout.addWidget(self.mute_btn, 0, Qt.AlignHCenter)
         layout.addWidget(name_label)
+
+    def _on_slider(self, value: int):
+        self.state.set(self.ch, value / SLIDER_RANGE)
+
+    def _on_mute(self):
+        if self.mute_btn.isChecked() != self.state.muted(self.ch):
+            self.state.toggle_mute(self.ch)
 
     def set_selected(self, selected: bool):
         if selected == self._selected:
@@ -103,21 +106,10 @@ class ChannelStrip(QFrame):
             else ""
         )
 
-    def _on_slider(self, value: int):
-        self.state.set(self.node, self.ch, value / SLIDER_RANGE)
+    def refresh(self, dimmed: bool):
+        muted = self.state.muted(self.ch)
 
-    def _on_mute(self):
-        # Drive the model from the button, then let refresh() reconcile styling.
-        if self.mute_btn.isChecked() != self.state.muted[self.node][self.ch]:
-            self.state.toggle_mute(self.node, self.ch)
-
-    def refresh(self):
-        """Sync widgets from the model (cheap; called every frame)."""
-        muted = self.state.muted[self.node][self.ch]
-
-        # Slider follows the target so programmatic changes (zero/fill) show up,
-        # without fighting the user during a drag (target == slider then).
-        want = round(self.state.target[self.node][self.ch] * SLIDER_RANGE)
+        want = round(self.state.target(self.ch) * SLIDER_RANGE)
         if self.slider.value() != want:
             self.slider.blockSignals(True)
             self.slider.setValue(want)
@@ -131,11 +123,13 @@ class ChannelStrip(QFrame):
         if muted:
             self.value_label.setText("mute")
         else:
-            self.value_label.setText(f"{self.state.current[self.node][self.ch]:.2f}")
+            self.value_label.setText(f"{self.state.current(self.ch):.2f}")
+        # Grey the label when the value is suppressed (muted or node released).
+        self.value_label.setStyleSheet("color: gray;" if dimmed else "")
 
 
 class NodeColumn(QWidget):
-    """One node's five channel strips plus a touch/release button."""
+    """One node's presence faders plus a touch/release button."""
 
     def __init__(self, state: ManualState, node: int):
         super().__init__()
@@ -157,7 +151,10 @@ class NodeColumn(QWidget):
 
         strips_row = QHBoxLayout()
         strips_row.setSpacing(2)
-        self.strips = [ChannelStrip(state, node, c) for c in range(NUM_CHANNELS)]
+        self.strips = [
+            ChannelStrip(state, ("pres", node, i), PRESENCE_LABELS[i])
+            for i in range(NUM_PRESENCE)
+        ]
         for strip in self.strips:
             strips_row.addWidget(strip)
         layout.addLayout(strips_row, 1)
@@ -166,7 +163,7 @@ class NodeColumn(QWidget):
         released = self.state.node_released(self.node)
         self.touch_btn.setText("Touch" if released else "Release")
         for strip in self.strips:
-            strip.refresh()
+            strip.refresh(dimmed=released or strip.state.muted(strip.ch))
 
 
 class MixerWindow(QMainWindow):
@@ -176,14 +173,14 @@ class MixerWindow(QMainWindow):
         self.state = ManualState(smoothing=smoothing, jitter=jitter)
         self.clients = clients
         self.start = time.monotonic()
-        self.sel_node = 0
-        self.sel_ch = 0
+        self.channels = self.state.channels()
+        self.sel = 0
 
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        # Node columns.
+        # --- Presence: node columns ---
         cols = QHBoxLayout()
         self.columns = [NodeColumn(self.state, n) for n in range(NUM_NODES)]
         for i, col in enumerate(self.columns):
@@ -194,9 +191,29 @@ class MixerWindow(QMainWindow):
                 cols.addWidget(divider)
         root.addLayout(cols, 1)
 
-        # Global control bar.
-        controls = QHBoxLayout()
+        # --- Couplings: one fader per node pair ---
+        pair_box = QVBoxLayout()
+        pair_box.addWidget(QLabel("GSR couplings (node pairs)"))
+        pair_row = QHBoxLayout()
+        self.pair_strips = []
+        for p, (a, b) in enumerate(NODE_PAIRS):
+            strip = ChannelStrip(self.state, ("pair", p), f"{a}–{b}")
+            self.pair_strips.append(strip)
+            pair_row.addWidget(strip)
+        pair_row.addStretch(1)
+        pair_box.addLayout(pair_row)
+        root.addLayout(pair_box, 1)
 
+        # Map each channel key to its strip widget for selection highlighting.
+        self._strip_for = {}
+        for col in self.columns:
+            for strip in col.strips:
+                self._strip_for[strip.ch] = strip
+        for strip in self.pair_strips:
+            self._strip_for[strip.ch] = strip
+
+        # --- Global control bar ---
+        controls = QHBoxLayout()
         targets = ", ".join(f"{c._address}:{c._port}" for c in clients)
         controls.addWidget(QLabel(f"OSC → {targets}  @ {rate:g} Hz"))
         controls.addStretch(1)
@@ -204,17 +221,13 @@ class MixerWindow(QMainWindow):
         self.smooth_chk = QCheckBox("smoothing")
         self.smooth_chk.setChecked(smoothing)
         self.smooth_chk.setFocusPolicy(Qt.NoFocus)
-        self.smooth_chk.toggled.connect(
-            lambda v: setattr(self.state, "smoothing", v)
-        )
+        self.smooth_chk.toggled.connect(lambda v: setattr(self.state, "smoothing", v))
         controls.addWidget(self.smooth_chk)
 
         self.jitter_chk = QCheckBox("jitter")
         self.jitter_chk.setChecked(jitter)
         self.jitter_chk.setFocusPolicy(Qt.NoFocus)
-        self.jitter_chk.toggled.connect(
-            lambda v: setattr(self.state, "jitter", v)
-        )
+        self.jitter_chk.toggled.connect(lambda v: setattr(self.state, "jitter", v))
         controls.addWidget(self.jitter_chk)
 
         zero_btn = QPushButton("Zero all")
@@ -226,24 +239,22 @@ class MixerWindow(QMainWindow):
         fill_btn.setFocusPolicy(Qt.NoFocus)
         fill_btn.clicked.connect(self.state.fill_all)
         controls.addWidget(fill_btn)
-
         root.addLayout(controls)
 
-        # Keyboard status + shortcut hint.
+        # --- Keyboard status + hint ---
         self.status_label = QLabel()
         root.addWidget(self.status_label)
         hint = QLabel(
             "keys:  arrows/hjkl move   +/- adjust   ]/[ fine   0-9 set   space=1.0   "
-            "x mute   t touch/release   n/m zero/max node   z/f zero/fill   s smooth   J jitter   q quit"
+            "x mute   t touch/release node   n/m zero/max node   z/f zero/fill   "
+            "s smooth   J jitter   q quit"
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: gray;")
         root.addWidget(hint)
 
-        # The window owns all keystrokes; child widgets are NoFocus.
         self.setFocusPolicy(Qt.StrongFocus)
 
-        # Drive OSC + UI refresh off one timer.
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(max(1, round(1000.0 / rate)))
@@ -257,52 +268,53 @@ class MixerWindow(QMainWindow):
     def _sync_widgets(self):
         for col in self.columns:
             col.refresh()
-        for n, col in enumerate(self.columns):
-            for c, strip in enumerate(col.strips):
-                strip.set_selected(n == self.sel_node and c == self.sel_ch)
-        ch_name = NODE_CHANNELS[self.sel_ch][0]
-        muted = self.state.muted[self.sel_node][self.sel_ch]
-        val = "muted" if muted else f"{self.state.target[self.sel_node][self.sel_ch]:.2f}"
-        self.status_label.setText(
-            f"selected:  node {self.sel_node} / {ch_name} = {val}"
-        )
+        for p, (a, b) in enumerate(NODE_PAIRS):
+            dimmed = self.state.pair_muted[p] or self.state.released[a] or self.state.released[b]
+            self.pair_strips[p].refresh(dimmed=dimmed)
+
+        sel_ch = self.channels[self.sel]
+        for ch, strip in self._strip_for.items():
+            strip.set_selected(ch == sel_ch)
+
+        val = "muted" if self.state.muted(sel_ch) else f"{self.state.target(sel_ch):.2f}"
+        self.status_label.setText(f"selected:  {self.state.label(sel_ch)} = {val}")
 
     def keyPressEvent(self, event):
         key = event.key()
         text = event.text()
-        n, c = self.sel_node, self.sel_ch
+        sel_ch = self.channels[self.sel]
+        n_ch = len(self.channels)
 
         if key == Qt.Key_Q or key == Qt.Key_Escape:
             self.close()
             return
-        elif key == Qt.Key_Left or text == "h":
-            self.sel_node = (n - 1) % NUM_NODES
-        elif key == Qt.Key_Right or text == "l":
-            self.sel_node = (n + 1) % NUM_NODES
-        elif key == Qt.Key_Up or text == "k":
-            self.sel_ch = (c - 1) % NUM_CHANNELS
-        elif key == Qt.Key_Down or text == "j":
-            self.sel_ch = (c + 1) % NUM_CHANNELS
+        elif key in (Qt.Key_Left, Qt.Key_Up) or text in ("h", "k"):
+            self.sel = (self.sel - 1) % n_ch
+        elif key in (Qt.Key_Right, Qt.Key_Down) or text in ("l", "j"):
+            self.sel = (self.sel + 1) % n_ch
         elif text in ("+", "="):
-            self.state.adjust(n, c, STEP)
+            self.state.adjust(sel_ch, STEP)
         elif text in ("-", "_"):
-            self.state.adjust(n, c, -STEP)
+            self.state.adjust(sel_ch, -STEP)
         elif text == "]":
-            self.state.adjust(n, c, FINE_STEP)
+            self.state.adjust(sel_ch, FINE_STEP)
         elif text == "[":
-            self.state.adjust(n, c, -FINE_STEP)
+            self.state.adjust(sel_ch, -FINE_STEP)
         elif text == " ":
-            self.state.set(n, c, 1.0)
+            self.state.set(sel_ch, 1.0)
         elif text.isdigit():
-            self.state.set(n, c, int(text) / 10.0)
+            self.state.set(sel_ch, int(text) / 10.0)
         elif text == "x":
-            self.state.toggle_mute(n, c)
+            self.state.toggle_mute(sel_ch)
         elif text == "t":
-            self.state.toggle_touch(n)
+            if sel_ch[0] == "pres":
+                self.state.toggle_touch(sel_ch[1])
         elif text == "n":
-            self.state.set_node(n, 0.0)
+            if sel_ch[0] == "pres":
+                self.state.set_node(sel_ch[1], 0.0)
         elif text == "m":
-            self.state.set_node(n, 1.0)
+            if sel_ch[0] == "pres":
+                self.state.set_node(sel_ch[1], 1.0)
         elif text == "z":
             self.state.zero_all()
         elif text == "f":
@@ -315,7 +327,6 @@ class MixerWindow(QMainWindow):
             super().keyPressEvent(event)
             return
 
-        # Reflect the change immediately rather than waiting for the next tick.
         self._sync_widgets()
 
 
@@ -348,7 +359,7 @@ def main():
 
     app = QApplication(sys.argv)
     window = MixerWindow(clients, args.rate, not args.no_smoothing, args.jitter)
-    window.resize(720, 520)
+    window.resize(760, 620)
     window.show()
     sys.exit(app.exec())
 

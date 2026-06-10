@@ -8,12 +8,20 @@ floats — `self_stdev`, `self_carrier_mag`, and three `gsr_mag` cross-couplings
 
 ## `manual.py` — hands-on control
 
-A fully manual simulator: every one of the 20 OSC floats (4 nodes × 5
-channels) is an independent slider you drive from the keyboard, so you can pose
-any sensor state and hold it. Unlike the automated tool, nothing changes unless
-you change it. Mute is non-destructive — `x` mutes one channel and `t`
-touches/releases a whole node (a "user"), both keeping the dialed-in levels so
-you can simulate people touching and letting go without re-posing.
+A fully manual simulator you drive from the keyboard, so you can pose any sensor
+state and hold it. Unlike the automated tool, nothing changes unless you change
+it. The controls match the physical model the receiver reconstructs:
+
+* **Presence** per node — `stdev` and `carrier`, independent (8 channels).
+* **Couplings** per node *pair* — one GSR value per pair (6 channels). The
+  firmware reports each pair from *both* nodes, so the simulator drives it from
+  a single fader and writes it to both sides — set a coupling once and both
+  nodes report it identically. Releasing a user zeroes its presence and every
+  coupling it touches, on both sides.
+
+Mute is non-destructive — `x` mutes one channel and `t` touches/releases a whole
+node (a "user"), both keeping the dialed-in levels so you can simulate people
+touching and letting go without re-posing.
 
 ```bash
 uv run python osc-sim/manual.py --host localhost          # single target
@@ -30,8 +38,8 @@ Controls (also shown in the footer):
 | `0`–`9` | set the selected channel to 0.0 .. 0.9 |
 | space | set the selected channel to 1.0 |
 | `x` | mute / unmute the selected channel (keeps its dialed level) |
-| `t` | touch / release the selected node — mute all its channels at once |
-| `n` / `m` | zero / max the whole selected node |
+| `t` | touch / release the selected node (its presence + couplings) |
+| `n` / `m` | zero / max the selected node (presence + its couplings) |
 | `z` / `f` | zero / fill every channel |
 | `s` | toggle smoothing (eased transitions vs. instant) |
 | `J` | toggle organic jitter (subtle noise layered on held values) |
@@ -42,21 +50,20 @@ Useful flags: `--rate HZ` (default 30), `--no-smoothing`, `--jitter`.
 ### Desktop GUI (`manual_gui.py`)
 
 `manual_gui.py` is a Qt (PySide6) desktop front-end over the *same* state model
-as `manual.py` — identical OSC, smoothing, jitter and mute behaviour, presented
-as a mixer of vertical faders with per-channel mute buttons and a per-node
-touch/release button. PySide6 is an optional dependency, so install the `gui`
-group first:
+as `manual.py` — identical OSC, smoothing, jitter, mute and pair-symmetry
+behaviour. PySide6 is an optional dependency, so install the `gui` group first:
 
 ```bash
 uv sync --group gui
 uv run --group gui python osc-sim/manual_gui.py --host localhost
 ```
 
-Each node is a column of five faders; the label above a fader shows the live
-value being sent and the slider sets the target. The `M` button mutes a single
-channel; the per-column **Release/Touch** button mutes or restores a whole user
-at once. Global toggles for smoothing and jitter and `Zero all`/`Fill all`
-buttons sit along the bottom. Same CLI flags as `manual.py`.
+Each node is a column with its `stdev`/`carrier` presence faders and a
+**Release/Touch** button; the six GSR couplings are a row of faders below,
+labelled by node pair (e.g. `0–1`). The label above a fader shows the live value
+being sent; the slider sets the target. The `M` button mutes a single channel.
+Global toggles for smoothing and jitter and `Zero all`/`Fill all` buttons sit
+along the bottom. Same CLI flags as `manual.py`.
 
 The GUI is fully keyboard-drivable with the same keys as the curses tool — a
 highlighted cursor marks the selected channel:
@@ -69,8 +76,8 @@ highlighted cursor marks the selected channel:
 | `0`–`9` | set selected channel to 0.0 .. 0.9 |
 | space | set selected channel to 1.0 |
 | `x` | mute / unmute the selected channel |
-| `t` | touch / release the selected node |
-| `n` / `m` | zero / max the whole selected node |
+| `t` | touch / release the selected node (presence channels) |
+| `n` / `m` | zero / max the selected node (presence channels) |
 | `z` / `f` | zero / fill every channel |
 | `s` / `J` | toggle smoothing / jitter |
 | `q` | quit |
