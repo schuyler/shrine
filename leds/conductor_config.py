@@ -126,6 +126,70 @@ def validate_tempo_config(config: dict) -> dict:
     return dict(tempo)
 
 
+def validate_program_params(config: dict) -> dict[str, dict]:
+    """Validate and return the program_params section from a conductor config dict.
+
+    Returns {} if the section is absent (optional section).
+    If present, must be a dict of program_name → {sx: {base, scale}, ix: {base, scale}}.
+    sx and ix sub-dicts are each optional; absent keys fall back to defaults at read time.
+    base and scale must be numbers (int or float).
+    Raises ValueError on structural errors.
+    """
+    if "program_params" not in config:
+        return {}
+
+    raw = config["program_params"]
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"'program_params' must be a dict, got {type(raw).__name__}"
+        )
+
+    result: dict[str, dict] = {}
+    for prog_name, prog_val in raw.items():
+        if not isinstance(prog_val, dict):
+            raise ValueError(
+                f"'program_params[{prog_name!r}]' must be a dict, got {type(prog_val).__name__}"
+            )
+        prog_result: dict[str, dict] = {}
+        for dim in ("sx", "ix"):
+            if dim not in prog_val:
+                continue
+            sub = prog_val[dim]
+            if not isinstance(sub, dict):
+                raise ValueError(
+                    f"'program_params[{prog_name!r}][{dim!r}]' must be a dict, got {type(sub).__name__}"
+                )
+            sub_result: dict[str, float | int] = {}
+            for key in ("base", "scale"):
+                if key not in sub:
+                    continue
+                val = sub[key]
+                if not isinstance(val, (int, float)):
+                    raise ValueError(
+                        f"'program_params[{prog_name!r}][{dim!r}][{key!r}]' must be numeric, "
+                        f"got {type(val).__name__}"
+                    )
+                sub_result[key] = val
+            # Warn on unrecognized keys within the sx/ix sub-dict
+            for k in sub:
+                if k not in ("base", "scale"):
+                    logger.warning(
+                        "program_params[%r][%r]: unrecognized key %r (ignored)",
+                        prog_name, dim, k,
+                    )
+            prog_result[dim] = sub_result
+        # Warn on unrecognized keys at the program-entry level (e.g. typo 'iz' instead of 'ix')
+        for k in prog_val:
+            if k not in ("sx", "ix"):
+                logger.warning(
+                    "program_params[%r]: unrecognized key %r (ignored)",
+                    prog_name, k,
+                )
+        result[prog_name] = prog_result
+
+    return result
+
+
 def load_conductor_config(path: str | Path | None = None) -> dict:
     """Load conductor.yaml, returning a plain dict.
 

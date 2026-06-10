@@ -1,10 +1,8 @@
-"""Converge program — group signature colors blend toward centroid."""
+"""Converge program — colorwaves across connected participants' signature colors."""
 
-from leds.color import group_centroid, lerp_hsv
+from leds.color import lerp_hsv
+from leds.program_config import get_program_params, resolve_ix, resolve_sx
 from leds.programs import Program, SegmentParams, register
-
-# Blend factor by group size. Larger groups blend more strongly.
-_BLEND_BY_SIZE = {1: 0.0, 2: 0.3, 3: 0.6, 4: 0.9}
 
 
 def _clamp(value, lo, hi):
@@ -20,6 +18,9 @@ class ConvergeProgram(Program):
     def render(self, pads, palette, clock_phase, state):
         idle = palette.get("idle")
         warm = palette.get("warm")
+        params = get_program_params("converge")
+        sx = resolve_sx(params, clock_phase.bpm)
+        ix = resolve_ix(params, clock_phase.bpm)
 
         # All pads share the same group frozenset.
         group = pads[0].group if pads else frozenset()
@@ -30,23 +31,21 @@ class ConvergeProgram(Program):
             if i in group and pad.signature_color is not None:
                 group_colors.append(pad.signature_color)
 
-        centroid = group_centroid(group_colors) if len(group_colors) >= 2 else None
-        blend_t = _BLEND_BY_SIZE.get(len(group), 0.9)
-
         segments = []
         for i, pad in enumerate(pads):
             cap = _clamp(pad.cap, 0.0, 1.0)
             base_color = pad.signature_color if pad.signature_color is not None else idle
 
-            if i in group and centroid is not None:
-                # Blend toward group centroid, then slight warm shift with cap
-                color = lerp_hsv(base_color, centroid, blend_t)
-                color = lerp_hsv(color, warm, cap * 0.15)
+            if i in group and len(group_colors) >= 2:
+                # Colorwaves across both participants' signature colors
                 bri = _clamp(round(50 + cap * 205), 50, 255)
+                segments.append(SegmentParams(
+                    col=group_colors[:2], bri=bri, fx="colorwaves", sx=sx, ix=ix,
+                ))
             else:
                 # Not in group — breathe-like behavior
                 color = lerp_hsv(base_color, warm, cap * 0.2)
                 bri = _clamp(round(20 + cap * 235), 20, 255)
+                segments.append(SegmentParams(col=[color], bri=bri))
 
-            segments.append(SegmentParams(col=[color], bri=bri))
         return segments, {}

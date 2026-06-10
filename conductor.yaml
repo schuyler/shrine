@@ -64,3 +64,26 @@ palettes:
   aligning: "default"
   energizing: "default"
   ascending: "ascending"
+
+program_params:
+  breathe:
+    sx:
+      base: 128
+      scale: 0.0
+    ix:
+      base: 128
+      scale: 0.0
+  pulse:
+    sx:
+      base: 70
+      scale: 0.0
+    ix:
+      base: 128
+      scale: 0.0
+  converge:
+    sx:
+      base: 100
+      scale: 0.5
+    ix:
+      base: 128
+      scale: 0.0

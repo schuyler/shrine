@@ -19,7 +19,7 @@ from leds.state_machine import State
 # ---------------------------------------------------------------------------
 # These imports will fail (ImportError) until the green phase.
 # ---------------------------------------------------------------------------
-from leds.conductor_config import validate_state_mappings, validate_tempo_config  # noqa: E402
+from leds.conductor_config import validate_state_mappings, validate_tempo_config, validate_program_params  # noqa: E402
 from leds.conductor import _get_mappings, _set_mappings, _ConfigReloadHandler  # noqa: E402
 
 
@@ -839,3 +839,92 @@ class TestValidateTempoConfigExtraKeys:
         with caplog.at_level(logging.WARNING):
             validate_tempo_config(config)
         assert "typo_state" in " ".join(caplog.messages)
+
+
+# ---------------------------------------------------------------------------
+# validate_program_params
+# ---------------------------------------------------------------------------
+
+
+class TestValidateProgramParams:
+    def test_missing_section_returns_empty_dict(self):
+        # config has no program_params key → returns {}
+        result = validate_program_params({})
+        assert result == {}
+
+    def test_valid_section_round_trips(self):
+        # Full valid section with known programs
+        config = {
+            "program_params": {
+                "breathe": {
+                    "sx": {"base": 100, "scale": 0.5},
+                    "ix": {"base": 200, "scale": 0.0},
+                }
+            }
+        }
+        result = validate_program_params(config)
+        assert result["breathe"]["sx"]["base"] == 100
+        assert result["breathe"]["sx"]["scale"] == 0.5
+        assert result["breathe"]["ix"]["base"] == 200
+
+    def test_non_dict_section_raises_value_error(self):
+        with pytest.raises(ValueError):
+            validate_program_params({"program_params": "not a dict"})
+
+    def test_non_dict_program_entry_raises_value_error(self):
+        with pytest.raises(ValueError):
+            validate_program_params({"program_params": {"breathe": "not a dict"}})
+
+    def test_non_numeric_base_raises_value_error(self):
+        config = {
+            "program_params": {
+                "breathe": {"sx": {"base": "fast", "scale": 0.0}}
+            }
+        }
+        with pytest.raises(ValueError):
+            validate_program_params(config)
+
+    def test_non_numeric_scale_raises_value_error(self):
+        config = {
+            "program_params": {
+                "breathe": {"sx": {"base": 128, "scale": "slow"}}
+            }
+        }
+        with pytest.raises(ValueError):
+            validate_program_params(config)
+
+    def test_partial_params_accepted(self):
+        # Only sx specified; ix absent — should not raise
+        config = {
+            "program_params": {
+                "breathe": {"sx": {"base": 64, "scale": 0.0}}
+            }
+        }
+        result = validate_program_params(config)
+        assert result["breathe"]["sx"]["base"] == 64
+        # ix key absent from result is fine — defaults applied at read time
+
+    def test_empty_program_params_dict_accepted(self):
+        config = {"program_params": {}}
+        result = validate_program_params(config)
+        assert result == {}
+
+    def test_non_dict_sx_subkey_raises_value_error(self):
+        # sx value is a scalar (42), not a dict — structural error
+        config = {
+            "program_params": {
+                "breathe": {"sx": 42}
+            }
+        }
+        with pytest.raises(ValueError):
+            validate_program_params(config)
+
+    def test_non_dict_ix_subkey_raises_value_error(self):
+        # ix value is a scalar (42), not a dict — structural error
+        config = {
+            "program_params": {
+                "breathe": {"ix": 42}
+            }
+        }
+        with pytest.raises(ValueError):
+            validate_program_params(config)

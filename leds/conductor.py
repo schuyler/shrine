@@ -19,9 +19,11 @@ from watchdog.observers import Observer
 
 from leds.conductor_config import (
     load_conductor_config,
+    validate_program_params,
     validate_state_mappings,
     validate_tempo_config,
 )
+from leds.program_config import set_program_params
 from leds.osc_server import ReusePortOSCUDPServer
 from leds.sensor_state import SensorState
 from leds.state_machine import GroupChangedEvent, State, StateMachine, StateChangedEvent
@@ -94,10 +96,6 @@ class _ConfigReloadHandler(FileSystemEventHandler):
             return
 
         _set_mappings(programs, palettes)
-        # Update debounce timestamp only on success. If reload fails (bad
-        # YAML, missing keys), the next event is NOT suppressed — so a quick
-        # correction by the user is picked up immediately.
-        self._last_reload = time.monotonic()
         logger.info("Reloaded conductor config mappings")
 
         # Re-send current state's program/palette to LED stack.
@@ -105,6 +103,25 @@ class _ConfigReloadHandler(FileSystemEventHandler):
         name = state.name.lower()
         self._led_client.send_message("/leds/program", programs[name])
         self._led_client.send_message("/leds/palette", palettes[name])
+
+        # Hot-reload program_params independently: a failure here keeps
+        # previous params but does NOT abort the programs/palettes update.
+        try:
+            new_params = validate_program_params(raw)
+            set_program_params(new_params)
+        except Exception:
+            logger.warning(
+                "program_params reload failed; keeping previous params",
+                exc_info=True,
+            )
+
+        # Update debounce timestamp after the entire reload completes.
+        # This is reached whenever programs/palettes validation succeeds (including
+        # when program_params fails — the try/except falls through). It is NOT
+        # reached when programs/palettes validation fails (early return above).
+        # Asymmetric by design: a failed programs/palettes save is not debounced,
+        # so the operator's next quick correction is always picked up immediately.
+        self._last_reload = time.monotonic()
 
 # Major-pentatonic offsets, mirroring pd/mode-table.pd (intervals 0 2 4 7 9).
 _PENTATONIC = (0, 2, 4, 7, 9)
@@ -190,6 +207,12 @@ def main() -> None:
     # Validate and install initial mappings (fatal on failure).
     programs_init, palettes_init = validate_state_mappings(config)
     _set_mappings(programs_init, palettes_init)
+
+    # Load initial program_params (non-fatal if missing/invalid).
+    try:
+        set_program_params(validate_program_params(config))
+    except Exception:
+        logger.warning("Invalid program_params in config; using defaults", exc_info=True)
 
     sensor_state = SensorState(sensing_cfg)
     fsm = StateMachine(
