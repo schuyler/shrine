@@ -84,13 +84,16 @@ two patches binding 57120 would contend, not both receive). It publishes:
 | `drone.pd` | **verified** | additive presence drone (inlet0 cap, inlet1 base Hz) |
 | `master.pd` | verified (load) | per-channel soft-limit → `dac~ 1-4` |
 | `clock.pd` | verified (load) | global pulse: `beat`, `bar`, `beat-ms` (default 60 BPM) |
-| `mode-table.pd` | **verified** | fills `mode-notes` array (major pentatonic, MIDI 36–93) |
+| `state-table.pd` | **verified** | maps `shrine-state` int (0–4) → mode symbol on `s scene-mode`; arc: quiet/seeking → major-penta, aligning → dorian, energizing → mixolydian-b6, ascending → ionian |
+| `mode-table.pd` | **verified** | routes `scene-mode` symbol → writes `mode-intervals` array + `mode-size` + `mode-changed`; handles 9 modes including `mixolydian-b6` |
 | `restless.pd` | **verified** | fluctuation proxy 0–1 (replaces absent gsr-stdev) |
 | `melodic-voice.pd` | unverified (reworked) | bang-triggered per-pair walk → `pitch velocity` pairs out an outlet → texture `Note` inlet |
 | `heartbeat.pd` | verified | STUB: constant 60 BPM + 0 detune (per build plan) |
 | `monitor.pd` | verified (load) | DEV-ONLY bus printer (do not load in production) |
 | `main.pd` | verified (load) | top level: OSC + 4 drones + master |
 | `texture-test.pd` | unverified (ELSE) | per-voice instruments (each embeds its own `[else/sfont~]` + FX), driven by a `Note` inlet expecting `pitch velocity` pairs |
+| `test/modetest.pd` | verified | headless test: sequences shrine-state 0–4, prints STATE-MODE / MODE-SIZE / INTERVAL-0..6 for each state |
+| `test/run_modetest.py` | verified | Python driver for `modetest.pd`; parses Pd stderr and checks mode symbols, sizes, and intervals against the design arc |
 
 "verified" = exercised headless under Pd 0.54 with the real OSC format / signal
 measurement (see Testing). "verified (load)" = loads clean, components verified
@@ -152,6 +155,18 @@ Expect `print: MELODY <pitch> <velocity>` lines: a first note-on, then
 alternating `<prev> 0` (note-off) / `<new> <vel>` (note-on) pairs as the walk
 steps. Pitches should stay within ~1.5 octaves of MIDI 60 and on the major
 pentatonic (60, 62, 64, 67, 69, …). Requires Pd vanilla only (no ELSE).
+
+Mode progression (state-table + mode-table) — sequences shrine-state 0–4 and
+verifies each state emits the correct mode symbol, mode-size, and interval
+array:
+
+```bash
+uv run python pd/test/run_modetest.py
+```
+
+Expected: state 0–1 → major-penta (size 5), state 2 → dorian (size 7),
+state 3 → mixolydian-b6 (size 7, intervals 0 2 4 5 7 8 10),
+state 4 → ionian (size 7). Requires Pd vanilla only (no ELSE).
 
 ## Gotchas discovered (worth knowing before editing)
 

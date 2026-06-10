@@ -4,7 +4,7 @@
 #X text 20 52 Sends: mode-size (float) \, mode-changed (bang). Array: mode-intervals (size 7).;
 #X obj 30 100 r scene-mode;
 #X obj 200 100 inlet;
-#X obj 30 140 route major-penta minor-penta ionian dorian phrygian lydian mixolydian aeolian;
+#X obj 30 140 route major-penta minor-penta ionian dorian phrygian lydian mixolydian mixolydian-b6 aeolian;
 #X connect 3 0 5 0;
 #X connect 4 0 5 0;
 #X msg 30 200 \; mode-intervals 0 0 2 4 7 9 0 0 \; mode-size 5 \; mode-changed bang;
@@ -21,10 +21,12 @@
 #X connect 5 5 11 0;
 #X msg 400 300 \; mode-intervals 0 0 2 4 5 7 9 10 \; mode-size 7 \; mode-changed bang;
 #X connect 5 6 12 0;
-#X msg 600 300 \; mode-intervals 0 0 2 3 5 7 8 10 \; mode-size 7 \; mode-changed bang;
+#X msg 600 300 \; mode-intervals 0 0 2 4 5 7 8 10 \; mode-size 7 \; mode-changed bang;
 #X connect 5 7 13 0;
+#X msg 600 400 \; mode-intervals 0 0 2 3 5 7 8 10 \; mode-size 7 \; mode-changed bang;
+#X connect 5 8 14 0;
 #X obj 30 430 loadbang;
 #X msg 30 460 major-penta;
-#X connect 14 0 15 0;
-#X connect 15 0 5 0;
+#X connect 15 0 16 0;
+#X connect 16 0 5 0;
 #X obj 30 520 table mode-intervals 7;
