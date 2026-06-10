@@ -1,9 +1,9 @@
 # Shrine Pure Data sound engine
 
-Pure Data audio engine for the **Shrine of Inter-Dimensional Propitiation**. It
-receives OSC from the four ESP32 sensor nodes and turns capacitive + GSR sensing
-into sound. See the BSS wiki pages `Pd_Architecture`, `Voice_Architecture`,
-`Pd_Build_Plan`, and `Sound_Design_Cookbook` for the full design.
+Pure Data sound engine for Shrine. It receives OSC from the four ESP32 sensor
+nodes and turns capacitive + GSR sensing into sound. See the BSS wiki pages
+`Pd_Architecture`, `Voice_Architecture`, `Pd_Build_Plan`, and
+`Sound_Design_Cookbook` for the full design.
 
 The engine is intentionally **two engines split by layer**:
 
@@ -40,10 +40,9 @@ GSR slot → global pair mapping (`NODE_GSR_MAPPING`, see `leds/sensor_state.py`
 
 Each pair is sensed by two nodes (redundant); last writer wins, as in `leds/`.
 
-**Value ranges:** the simulator sends cap≈0–1000 and gsr≈0–50 (mimicking firmware
-ranges); `osc-receive` normalizes to 0–1 in `normcap` (÷1000) / `normgsr` (÷50).
-Real firmware sends *calibrated* values — revisit these divisors against a live
-node before deployment.
+**Value ranges:** firmware sends calibrated 0–1 values (normalized on-device).
+The simulator matches this range. All values arrive as 0–1 floats; no divisor
+abstractions are needed in Pd.
 
 ### Named buses
 
@@ -78,37 +77,27 @@ two patches binding 57120 would contend, not both receive). It publishes:
   its own octave (effective root = `shrine-root + 12·octave`; the textures take
   octaves 0/1/2). `osc-receive` `[loadbang]`s **36** so the engine cold-starts
   in a defined key. Send e.g. `/shrine/cue/root 48` to move the whole piece up a
-  fourth live. (No conductor automation sends this yet — it's an open hook.)
+  fourth live. The conductor picks a fresh pentatonic tonic on each transition
+  to quiet.
 
 ## Files
 
-| File | Status | Purpose |
-|------|--------|---------|
-| `osc-receive.pd` | **verified** (node) / unverified (cue) | OSC in → `cap-*` / `gsr-mag-*` buses + conductor `shrine-state` / `shrine-group` |
-| `normcap.pd` / `normgsr.pd` | verified | ÷1000 / ÷50 then clip 0–1 |
-| `nodevals.pd` | verified | unpack one node list → normalized cap + 3 gsr |
-| `drone.pd` | **verified** | additive presence drone (inlet0 cap, inlet1 base Hz) |
-| `master.pd` | verified (load) | per-channel soft-limit → `dac~ 1-4` |
-| `clock.pd` | verified (load) | global pulse: `beat`, `bar`, `beat-ms` (default 60 BPM) |
-| `state-table.pd` | **verified** | maps `shrine-state` int (0–4) → mode symbol on `s scene-mode`; arc: quiet/seeking → major-penta, aligning → dorian, energizing → mixolydian-b6, ascending → ionian |
-| `mode-table.pd` | **verified** | routes `scene-mode` symbol → writes `mode-intervals` array + `mode-size` + `mode-changed`; handles 9 modes including `mixolydian-b6` |
-| `restless.pd` | **verified** | fluctuation proxy 0–1 (replaces absent gsr-stdev) |
-| `melodic-voice.pd` | unverified (reworked) | inlet0 bang advances the walk (+ `octave N` msg); inlet1 velocity 0–1 (from cap-trigger). Common tonic via `[r shrine-root]`, effective root = `shrine-root + 12·octave`. Emits `pitch velocity` pairs → texture `Note` inlet |
-| `heartbeat.pd` | verified | STUB: constant 60 BPM + 0 detune (per build plan) |
-| `monitor.pd` | verified (load) | DEV-ONLY bus printer (do not load in production) |
-| `main.pd` | verified (load) | top level: OSC + 4 drones + master |
-| `texture-test.pd` | unverified (ELSE) | per-voice instruments (each embeds its own `[else/sfont~]` + FX), driven by a `Note` inlet expecting `pitch velocity` pairs |
-| `test/modetest.pd` | verified | headless test: sequences shrine-state 0–4, prints STATE-MODE / MODE-SIZE / INTERVAL-0..6 for each state |
-| `test/run_modetest.py` | verified | Python driver for `modetest.pd`; parses Pd stderr and checks mode symbols, sizes, and intervals against the design arc |
-
-"verified" = exercised headless under Pd 0.54 with the real OSC format / signal
-measurement (see Testing). "verified (load)" = loads clean, components verified
-individually. "unverified" = authored/reworked but not yet re-run on target
-(several depend on the ELSE `[sfont~]` available only on Pd 0.56+).
-
-`main.pd` currently wires the **additive drone slice** (OSC → cap → 4 drones →
-master), which is fully verified. The SoundFont melodic layer is the next wiring
-step (see Remaining work).
+| File | Purpose |
+|------|---------|
+| `osc-receive.pd` | OSC in → `cap-*` / `gsr-mag-*` buses + conductor `shrine-state` / `shrine-group` |
+| `drone.pd` | additive presence drone (inlet0 cap, inlet1 base Hz) |
+| `master.pd` | per-channel soft-limit → `dac~ 1-4` |
+| `clock.pd` | global pulse: `beat`, `bar`, `beat-ms` (default 60 BPM) |
+| `state-table.pd` | maps `shrine-state` int (0–4) → mode symbol on `s scene-mode`; arc: quiet/seeking → major-penta, aligning → dorian, energizing → mixolydian-b6, ascending → ionian |
+| `mode-table.pd` | routes `scene-mode` symbol → writes `mode-intervals` array + `mode-size` + `mode-changed`; handles 9 modes including `mixolydian-b6` |
+| `restless.pd` | fluctuation proxy 0–1 (derived from cap or gsr-mag, replaces absent gsr-stdev) |
+| `melodic-voice.pd` | inlet0 bang advances the walk (+ `octave N` msg); inlet1 velocity 0–1 (from cap-trigger). Common tonic via `[r shrine-root]`, effective root = `shrine-root + 12·octave`. Emits `pitch velocity` pairs → texture `Note` inlet |
+| `heartbeat.pd` | STUB: constant 60 BPM + 0 detune |
+| `monitor.pd` | DEV-ONLY bus printer (do not load in production) |
+| `main.pd` | top level: OSC + 4 drones + master |
+| `texture-test.pd` | per-voice instruments (each embeds its own `[else/sfont~]` + FX), driven by a `Note` inlet expecting `pitch velocity` pairs |
+| `test/modetest.pd` | headless test: sequences shrine-state 0–4, prints STATE-MODE / MODE-SIZE / INTERVAL-0..6 for each state |
+| `test/run_modetest.py` | Python driver for `modetest.pd`; parses Pd stderr and checks mode symbols, sizes, and intervals against the design arc |
 
 ## Running
 
@@ -133,7 +122,7 @@ bind with `--port 57120`.
 Production (headless), per `Pd_Architecture`:
 
 ```bash
-pd -nogui -rt -audioapi alsa -r 48000 -outchannels 8 \
+pd -nogui -rt -audioapi alsa -r 48000 -outchannels 4 \
    -audiooutdev "USB Audio" -path pd pd/main.pd
 ```
 
@@ -144,8 +133,8 @@ either driving real OSC at them or measuring DSP with `env~`/`snapshot~`, with a
 `[delay]→; pd quit` to self-terminate. Example — end-to-end OSC contract check:
 
 ```bash
-pd -nogui -noaudio -stderr -path pd test/osctest.pd &   # prints each bus
-uv run python test/send_nodes.py                        # sends /shrine/node/*
+pd -nogui -noaudio -stderr -path pd pd/test/osctest.pd &   # prints each bus
+uv run python pd/test/send_nodes.py                        # sends /shrine/node/*
 ```
 
 Melodic note generator (self-contained, no OSC needed) — drives one
@@ -185,23 +174,3 @@ state 4 → ionian (size 7). Requires Pd vanilla only (no ELSE).
   that's why `drone` takes its base frequency on an inlet.
 - **Commas and semicolons in `#X text` comments** must be escaped (`\,` `\;`) or
   Pd parses the tail as a separate message and throws "no method" errors.
-
-## Remaining work
-
-Mapping to `Pd_Build_Plan`'s phases:
-
-1. **Melodic layer (build-plan Phase 1/3):** wire the note generators to the
-   texture renderers in `main.pd` — instantiate a `melodic-voice` per pair, feed
-   each one's outlet (`pitch velocity` pairs) into a texture's `Note` inlet
-   (textures own their own `[else/sfont~]` + FX, see `texture-test.pd`), and drive
-   each `melodic-voice` with a per-voice trigger (a `metro`, or a `cap-trigger`-derived
-   bang). Verify on Pd 0.56 + ELSE.
-2. **Subdivision:** drive each `melodic-voice`'s trigger rate from `restless-*` via
-   the subdivision ladder (per-bar commit + hysteresis), rather than a fixed metro.
-3. **Walk polish:** the walk already reflects at the window edges and sends a
-   note-off before each note-on; tune the leap/reverse weights against real play.
-4. **Drone detune wobble:** high-pass `cap-N` and feed the fluctuation into the
-   drone partial detune (build-plan gotcha) — structure noted in `drone.pd`.
-5. **Heartbeat:** replace `heartbeat.pd` stub once the 1–3 Hz pulse signal is
-   bench-validated.
-6. **Output:** tactile sends (`dac~ 5-8`, LPF ~80 Hz) in `master.pd`.
