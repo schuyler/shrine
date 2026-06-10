@@ -6,6 +6,7 @@ messages to the LED stack and Pd.
 
 import argparse
 import logging
+import random
 import threading
 import time
 from pathlib import Path
@@ -104,6 +105,26 @@ class _ConfigReloadHandler(FileSystemEventHandler):
         name = state.name.lower()
         self._led_client.send_message("/leds/program", programs[name])
         self._led_client.send_message("/leds/palette", palettes[name])
+
+# Major-pentatonic offsets, mirroring pd/mode-table.pd (intervals 0 2 4 7 9).
+_PENTATONIC = (0, 2, 4, 7, 9)
+# Tonic the conductor picks roots around (C2); matches the shrine-root default.
+_ROOT_BASE = 36
+# The candidate tonics: one octave of major pentatonic above the base.
+_PENTATONIC_ROOTS: tuple[int, ...] = tuple(_ROOT_BASE + i for i in _PENTATONIC)
+
+_RNG = random.Random()
+
+
+def _pick_pentatonic_root(
+    exclude: int | None = None, rng: random.Random = _RNG
+) -> int:
+    """Pick a major-pentatonic MIDI note for the melodic tonic.
+
+    Avoids immediately repeating ``exclude`` so each quiet feels like a fresh key.
+    """
+    choices = [r for r in _PENTATONIC_ROOTS if r != exclude] or list(_PENTATONIC_ROOTS)
+    return rng.choice(choices)
 
 
 def _build_shrine_dispatcher(
@@ -205,6 +226,7 @@ def main() -> None:
 
     tick_interval = 1.0 / args.tick_rate
     last = time.monotonic()
+    current_root: int | None = None
 
     logger.info(
         "Conductor running. Listening on %s:%d → LED %s:%d, Pd %s:%d",
@@ -232,6 +254,12 @@ def main() -> None:
                     led_client.send_message("/leds/program", programs[name])
                     led_client.send_message("/leds/palette", palettes[name])
                     pd_client.send_message("/shrine/cue/state", name)
+                    if event.new == State.QUIET:
+                        # Re-key the piece on each return to stillness: pick a
+                        # fresh pentatonic tonic for the melodic voices.
+                        current_root = _pick_pentatonic_root(exclude=current_root)
+                        logger.info("Quiet → melodic root %d", current_root)
+                        pd_client.send_message("/shrine/cue/root", current_root)
 
                 elif isinstance(event, GroupChangedEvent):
                     members = sorted(event.members)
