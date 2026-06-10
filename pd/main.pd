@@ -170,6 +170,8 @@
 #X obj 580 510 sel 0;
 #X obj 580 540 t b;
 #X obj 650 575 melodic-voice 2;
+#X obj 1000 430 state-table;
+#X obj 1000 470 mode-table;
 #X connect 24 0 25 0;
 #X connect 1 0 26 0;
 #X connect 2 0 27 0;
