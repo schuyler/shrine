@@ -7,7 +7,7 @@ a creative arc of signal activity.
 
 Usage:
     python osc-sim/generator.py [--host HOST] [--port PORT] [--rate HZ]
-                                [--manual] [--scenario NAME]
+                                [--manual] [--scenario NAME] [--heartbeat BPM]
 """
 
 import argparse
@@ -41,6 +41,9 @@ GSR_MAG_SCALE = 1.0
 # Incommensurate frequencies for organic noise layering (Hz)
 NOISE_FREQS = [0.1, 0.23, 0.37, 0.71]
 NOISE_AMPS = [0.03, 0.025, 0.02, 0.02]
+
+# Heartbeat modulation depth (fraction of stdev)
+HEARTBEAT_DEPTH = 0.15
 
 
 def cosine_interp(t: float) -> float:
@@ -261,7 +264,8 @@ def build_channels(smoothing_rate: float = 0.02) -> dict:
     return channels
 
 
-def send_osc(clients: list, channels: dict, t: float, noise: bool = True) -> dict:
+def send_osc(clients: list, channels: dict, t: float, noise: bool = True,
+             heartbeat_bpm: float = 0) -> dict:
     """Send all OSC messages for the current tick to all clients.
 
     Sends one /shrine/node/{n} message per node (0-3), each with 5 floats:
@@ -276,6 +280,9 @@ def send_osc(clients: list, channels: dict, t: float, noise: bool = True) -> dic
         channels: Dict of channel keys to SignalChannel instances.
         t: Current time in seconds (used to compute noise-inclusive values).
         noise: If True, add organic noise on top of channel values.
+        heartbeat_bpm: If > 0, apply sinusoidal heartbeat modulation to stdev
+            at this rate (beats per minute). Multiplicative, so no modulation
+            occurs when stdev is zero.
 
     Returns:
         Dict mapping OSC address strings to the 5-float payload lists that were sent.
@@ -293,6 +300,12 @@ def send_osc(clients: list, channels: dict, t: float, noise: bool = True) -> dic
         cap_val = _val(("cap", pad))
 
         stdev = cap_val * STDEV_SCALE
+        if heartbeat_bpm > 0:
+            hz = heartbeat_bpm / 60.0
+            phase = node_id * 1.1  # decorrelate nodes
+            stdev *= 1.0 + HEARTBEAT_DEPTH * math.sin(
+                2.0 * math.pi * hz * t + phase
+            )
         carrier_mag = cap_val * CARRIER_MAG_SCALE
 
         gsr_mags = []
@@ -333,13 +346,14 @@ def print_summary(sent: dict, scenario: ArcScenario, t: float):
     )
 
 
-def run(clients: list, rate: float, scenario_name: str):
+def run(clients: list, rate: float, scenario_name: str, heartbeat_bpm: float = 0):
     """Main simulation loop.
 
     Args:
         clients: List of OSC UDP clients to send to.
         rate: Message send rate in Hz.
         scenario_name: Name of the scenario to run.
+        heartbeat_bpm: If > 0, apply heartbeat modulation to stdev at this BPM.
     """
     if scenario_name != "arc":
         print(f"Unknown scenario: {scenario_name!r}. Only 'arc' is supported.")
@@ -370,7 +384,7 @@ def run(clients: list, rate: float, scenario_name: str):
             for ch in channels.values():
                 ch.update(t)
 
-            sent = send_osc(clients, channels, t)
+            sent = send_osc(clients, channels, t, heartbeat_bpm=heartbeat_bpm)
             print_summary(sent, scenario, t)
 
             elapsed = time.monotonic() - now
@@ -584,6 +598,14 @@ def main():
         help="Named scenario to run (default: arc)",
     )
     parser.add_argument(
+        "--heartbeat",
+        type=float,
+        default=0,
+        metavar="BPM",
+        help="Apply sinusoidal heartbeat modulation to cap stdev at this BPM "
+             "(e.g., 72 for 1.2 Hz). 0 disables (default).",
+    )
+    parser.add_argument(
         "--targets",
         nargs="+",
         metavar="HOST:PORT",
@@ -604,7 +626,7 @@ def main():
         run_manual_mode(clients, args.rate)
         sys.exit(0)
 
-    run(clients, args.rate, args.scenario)
+    run(clients, args.rate, args.scenario, heartbeat_bpm=args.heartbeat)
 
 
 if __name__ == "__main__":
