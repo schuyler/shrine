@@ -55,11 +55,28 @@ buses were never backed by a signal). The "restlessness" the design needs for
 rhythmic subdivision is therefore **derived host-side** in `restless.pd` from the
 fluctuation of an existing stream (cap or gsr-mag).
 
+### Conductor cue buses
+
+The `leds/` conductor state machine fans cue events to Pd on the **same OSC
+port** (`/shrine/cue/*` → `--pd-port`, default 57120). `osc-receive` binds that
+port once and routes both streams off the single `[osc.receive]` (one UDP bind —
+two patches binding 57120 would contend, not both receive). It publishes:
+
+- `shrine-state` (int 0–4) — current scene from `/shrine/cue/state`:
+  `0 quiet · 1 seeking · 2 aligning · 3 energizing · 4 ascending`. Edge-triggered
+  by the conductor; `osc-receive` `[loadbang]`s **0 (quiet)** so the engine
+  cold-starts into the same state the FSM boots into. A mid-show Pd restart sits
+  in quiet until the next organic transition (accepted).
+- `shrine-group` (list of ints) — connected pad IDs in the largest component,
+  from `/shrine/cue/group`. **Informational only** for now (printed in
+  `monitor.pd`); not wired to sound. Its *size* is what drives the FSM's
+  escalation upstream.
+
 ## Files
 
 | File | Status | Purpose |
 |------|--------|---------|
-| `osc-receive.pd` | **verified** | OSC in → normalized `cap-*` / `gsr-mag-*` buses |
+| `osc-receive.pd` | **verified** (node) / unverified (cue) | OSC in → `cap-*` / `gsr-mag-*` buses + conductor `shrine-state` / `shrine-group` |
 | `normcap.pd` / `normgsr.pd` | verified | ÷1000 / ÷50 then clip 0–1 |
 | `nodevals.pd` | verified | unpack one node list → normalized cap + 3 gsr |
 | `drone.pd` | **verified** | additive presence drone (inlet0 cap, inlet1 base Hz) |
