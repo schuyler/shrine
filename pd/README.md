@@ -139,6 +139,20 @@ pd -nogui -noaudio -stderr -path pd test/osctest.pd &   # prints each bus
 uv run python test/send_nodes.py                        # sends /shrine/node/*
 ```
 
+Melodic note generator (self-contained, no OSC needed) — drives one
+`melodic-voice` from a `metro`, loads `mode-table` for the scale, feeds a
+constant `gsr-mag-0` for velocity, and prints each `pitch velocity` pair before
+quitting after ~3 s:
+
+```bash
+pd -nogui -noaudio -stderr -path pd pd/test/melodytest.pd
+```
+
+Expect `print: MELODY <pitch> <velocity>` lines: a first note-on, then
+alternating `<prev> 0` (note-off) / `<new> <vel>` (note-on) pairs as the walk
+steps. Pitches should stay within ~1.5 octaves of MIDI 60 and on the major
+pentatonic (60, 62, 64, 67, 69, …). Requires Pd vanilla only (no ELSE).
+
 ## Gotchas discovered (worth knowing before editing)
 
 - **`[oscparse]` splits the address** into separate symbols (`shrine node 0 …`),
