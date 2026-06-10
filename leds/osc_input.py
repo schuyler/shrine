@@ -5,7 +5,8 @@ import time
 
 from pythonosc.dispatcher import Dispatcher
 
-from leds.pad_state import PadState
+from leds.effects import resolve_effect
+from leds.pad_state import EffectOverride, PadState
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,33 @@ def build_dispatcher(state: PadState) -> Dispatcher:
     def tempo_handler(address, bpm, *args):
         state.set_tempo(float(bpm), time.monotonic())
     dispatcher.map("/leds/tempo", tempo_handler)
+
+    # /leds/effect <pad> <name|fx_id> [bri] [sx] [ix] [pal]
+    # Forces a named WLED effect onto a pad, overriding the running program
+    # until cleared.  Lets you test lighting without the conductor.  Use a
+    # name like "rainbow", a numeric WLED fx ID, or "off"/"clear" to release.
+    _CLEAR_TOKENS = {"off", "clear", "none"}
+
+    def effect_handler(address, pad, effect, *args):
+        pad = int(pad)
+        if str(effect).strip().lower() in _CLEAR_TOKENS:
+            state.clear_effect(pad)
+            return
+        fx = resolve_effect(effect)
+        if fx is None:
+            logger.warning("Unknown WLED effect: %r", effect)
+            return
+        bri = int(args[0]) if len(args) > 0 else 255
+        sx = int(args[1]) if len(args) > 1 else 128
+        ix = int(args[2]) if len(args) > 2 else 128
+        pal = int(args[3]) if len(args) > 3 else 0
+        state.set_effect(pad, EffectOverride(fx=fx, bri=bri, sx=sx, ix=ix, pal=pal))
+    dispatcher.map("/leds/effect", effect_handler)
+
+    # /leds/effect/clear   — release all manual effect overrides at once
+    def effect_clear_handler(address, *args):
+        state.clear_all_effects()
+    dispatcher.map("/leds/effect/clear", effect_clear_handler)
 
     # /leds/group <pad0> <pad1> ... (variable number of 0-indexed pad IDs)
     def group_handler(address, *args):

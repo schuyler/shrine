@@ -2,7 +2,56 @@ import threading
 
 import pytest
 
-from leds.pad_state import PadSnapshot, PadState
+from leds.pad_state import EffectOverride, PadSnapshot, PadState
+
+
+class TestEffectOverrides:
+    def test_no_overrides_initially(self):
+        state = PadState([0, 1, 2, 3])
+        assert state.effect_overrides() == {}
+
+    def test_set_effect_records_override(self):
+        state = PadState([0, 1, 2, 3])
+        ov = EffectOverride(fx=9)
+        state.set_effect(1, ov)
+        assert state.effect_overrides() == {1: ov}
+
+    def test_set_effect_unknown_pad_ignored(self):
+        state = PadState([0, 1, 2, 3])
+        state.set_effect(99, EffectOverride(fx=9))
+        assert state.effect_overrides() == {}
+
+    def test_clear_effect_removes_one(self):
+        state = PadState([0, 1, 2, 3])
+        state.set_effect(0, EffectOverride(fx=1))
+        state.set_effect(1, EffectOverride(fx=2))
+        state.clear_effect(0)
+        assert set(state.effect_overrides()) == {1}
+
+    def test_clear_effect_missing_pad_is_noop(self):
+        state = PadState([0, 1, 2, 3])
+        state.clear_effect(2)  # never set; must not raise
+        assert state.effect_overrides() == {}
+
+    def test_clear_all_effects(self):
+        state = PadState([0, 1, 2, 3])
+        state.set_effect(0, EffectOverride(fx=1))
+        state.set_effect(3, EffectOverride(fx=2))
+        state.clear_all_effects()
+        assert state.effect_overrides() == {}
+
+    def test_effect_overrides_returns_copy(self):
+        state = PadState([0, 1, 2, 3])
+        state.set_effect(0, EffectOverride(fx=1))
+        snapshot = state.effect_overrides()
+        snapshot[0] = EffectOverride(fx=999)
+        assert state.effect_overrides()[0].fx == 1
+
+    def test_overrides_not_in_state_snapshot_tuple(self):
+        # snapshot() must keep its 6-tuple shape for existing consumers.
+        state = PadState([0, 1, 2, 3])
+        state.set_effect(0, EffectOverride(fx=1))
+        assert len(state.snapshot()) == 6
 
 
 # ---------------------------------------------------------------------------

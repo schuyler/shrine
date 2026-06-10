@@ -209,6 +209,56 @@ class TestTempoHandler:
         assert gen == 2
 
 
+class TestEffectHandler:
+    def test_named_effect_sets_override(self):
+        state = PadState([0, 1, 2, 3])
+        dispatcher = build_dispatcher(state)
+        _call(dispatcher, "/leds/effect", 0, "rainbow")
+        overrides = state.effect_overrides()
+        assert overrides[0].fx == 9
+
+    def test_numeric_effect_id(self):
+        state = PadState([0, 1, 2, 3])
+        dispatcher = build_dispatcher(state)
+        _call(dispatcher, "/leds/effect", 2, 28)
+        assert state.effect_overrides()[2].fx == 28
+
+    def test_optional_params_applied(self):
+        state = PadState([0, 1, 2, 3])
+        dispatcher = build_dispatcher(state)
+        _call(dispatcher, "/leds/effect", 1, "chase", 200, 180, 100, 3)
+        ov = state.effect_overrides()[1]
+        assert (ov.bri, ov.sx, ov.ix, ov.pal) == (200, 180, 100, 3)
+
+    def test_defaults_when_params_omitted(self):
+        state = PadState([0, 1, 2, 3])
+        dispatcher = build_dispatcher(state)
+        _call(dispatcher, "/leds/effect", 1, "chase")
+        ov = state.effect_overrides()[1]
+        assert (ov.bri, ov.sx, ov.ix, ov.pal) == (255, 128, 128, 0)
+
+    def test_off_clears_override(self):
+        state = PadState([0, 1, 2, 3])
+        dispatcher = build_dispatcher(state)
+        _call(dispatcher, "/leds/effect", 0, "rainbow")
+        _call(dispatcher, "/leds/effect", 0, "off")
+        assert 0 not in state.effect_overrides()
+
+    def test_unknown_effect_ignored(self):
+        state = PadState([0, 1, 2, 3])
+        dispatcher = build_dispatcher(state)
+        _call(dispatcher, "/leds/effect", 0, "not_a_real_effect")
+        assert state.effect_overrides() == {}
+
+    def test_clear_all_releases_every_override(self):
+        state = PadState([0, 1, 2, 3])
+        dispatcher = build_dispatcher(state)
+        _call(dispatcher, "/leds/effect", 0, "rainbow")
+        _call(dispatcher, "/leds/effect", 1, "chase")
+        _call(dispatcher, "/leds/effect/clear")
+        assert state.effect_overrides() == {}
+
+
 class TestOutOfRangePad:
     def test_cap_unknown_pad_does_not_crash(self):
         state = PadState([0, 1, 2, 3])

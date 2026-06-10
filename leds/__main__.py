@@ -11,7 +11,7 @@ from leds.config import load_config
 from leds.osc_input import build_dispatcher
 from leds.pad_state import PadState
 from leds.palettes import load_palettes
-from leds.programs import get_program
+from leds.programs import SegmentParams, get_program
 from leds.wled import WledDispatcher
 
 logger = logging.getLogger(__name__)
@@ -109,6 +109,19 @@ def main():
             segments, program_state = program.render(pad_snaps, palette, phase, program_state)
 
             pad_segments = dict(zip(pads_config, segments))
+
+            # Manual effect overrides take precedence over the program output,
+            # so a pad can be driven to a named WLED effect for testing.
+            for pad, ov in state.effect_overrides().items():
+                if pad not in pad_segments:
+                    continue
+                col = ov.col
+                if col is None:
+                    sig = sig_colors.get(pad)
+                    col = [sig] if sig is not None else [[255, 255, 255]]
+                pad_segments[pad] = SegmentParams(
+                    col=col, bri=ov.bri, fx=ov.fx, sx=ov.sx, ix=ov.ix, pal=ov.pal)
+
             rtt = wled.send(pad_segments)
 
             if auto_latency and rtt is not None:

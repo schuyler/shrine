@@ -12,6 +12,22 @@ class PadSnapshot:
     signature_color: list[int] | None = None
 
 
+@dataclass(frozen=True)
+class EffectOverride:
+    """A manual WLED effect to force onto a pad, bypassing the program.
+
+    Used for testing the lighting independently of the running program.
+    ``col`` of ``None`` means "use the pad's signature color (or white)" —
+    resolved by the render loop, which is where signature colors live.
+    """
+    fx: int
+    bri: int = 255
+    sx: int = 128
+    ix: int = 128
+    pal: int = 0
+    col: list[list[int]] | None = None
+
+
 class PadState:
     def __init__(self, pads: list[int]):
         self._lock = threading.Lock()
@@ -27,6 +43,7 @@ class PadState:
         self._tempo_gen = 0
         self._signature_colors: dict[int, list[int]] = {}
         self._group: frozenset[int] = frozenset()
+        self._effect_overrides: dict[int, EffectOverride] = {}
 
     def set_cap(self, pad: int, value: float) -> None:
         with self._lock:
@@ -67,6 +84,24 @@ class PadState:
     def group(self) -> frozenset[int]:
         with self._lock:
             return self._group
+
+    def set_effect(self, pad: int, override: EffectOverride) -> None:
+        with self._lock:
+            if pad not in self._index:
+                return
+            self._effect_overrides[pad] = override
+
+    def clear_effect(self, pad: int) -> None:
+        with self._lock:
+            self._effect_overrides.pop(pad, None)
+
+    def clear_all_effects(self) -> None:
+        with self._lock:
+            self._effect_overrides.clear()
+
+    def effect_overrides(self) -> dict[int, EffectOverride]:
+        with self._lock:
+            return dict(self._effect_overrides)
 
     def set_signature_colors(self, colors: dict[int, list[int]]) -> None:
         with self._lock:
