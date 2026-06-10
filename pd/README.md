@@ -73,6 +73,12 @@ two patches binding 57120 would contend, not both receive). It publishes:
   from `/shrine/cue/group`. **Informational only** for now (printed in
   `monitor.pd`); not wired to sound. Its *size* is what drives the FSM's
   escalation upstream.
+- `shrine-root` (int MIDI, default 36) — the melodic tonic for the **whole
+  piece**, from `/shrine/cue/root <midi>`. Each `melodic-voice` transposes it by
+  its own octave (effective root = `shrine-root + 12·octave`; the textures take
+  octaves 0/1/2). `osc-receive` `[loadbang]`s **36** so the engine cold-starts
+  in a defined key. Send e.g. `/shrine/cue/root 48` to move the whole piece up a
+  fourth live. (No conductor automation sends this yet — it's an open hook.)
 
 ## Files
 

@@ -170,9 +170,6 @@
 #X obj 580 510 sel 0;
 #X obj 580 540 t b;
 #X obj 650 575 melodic-voice 2;
-#X obj 900 480 loadbang;
-#X msg 900 520 36;
-#X obj 900 560 s shrine-root;
 #X connect 24 0 25 0;
 #X connect 1 0 26 0;
 #X connect 2 0 27 0;
@@ -212,8 +209,6 @@
 #X connect 39 0 40 0;
 #X connect 40 0 16 0;
 #X connect 17 0 40 0;
-#X connect 41 0 42 0;
-#X connect 42 0 43 0;
 #X connect 5 1 32 1;
 #X connect 22 1 36 1;
 #X connect 23 1 40 1;
