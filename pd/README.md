@@ -137,10 +137,11 @@ pd -nogui -noaudio -stderr -path pd pd/test/osctest.pd &   # prints each bus
 uv run python pd/test/send_nodes.py                        # sends /shrine/node/*
 ```
 
-Melodic note generator (self-contained, no OSC needed) — drives one
-`melodic-voice` from a `metro`, loads `mode-table` for the scale, feeds a
-constant `gsr-mag-0` for velocity, and prints each `pitch velocity` pair before
-quitting after ~3 s:
+Melodic note generator (self-contained, no OSC needed) — loads `mode-table`
+for the scale and toggles a `metro`-driven 1/0 touch/release gate into
+`note-send`, which advances one `melodic-voice` and gates its pitches into
+note-on/note-off pairs (intensity fixed at 0.7 for velocity). Prints each
+`pitch velocity` pair before quitting after ~3 s:
 
 ```bash
 pd -nogui -noaudio -stderr -path pd pd/test/melodytest.pd
