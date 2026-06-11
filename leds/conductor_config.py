@@ -126,6 +126,69 @@ def validate_tempo_config(config: dict) -> dict:
     return dict(tempo)
 
 
+_ALLOWED_SUBDIV = {1, 2, 4, 8, 16}
+
+
+def validate_subdiv_config(config: dict) -> dict:
+    """Validate and return the subdiv section from a conductor config dict.
+
+    The melodic re-fire grid, expressed in clock ticks per re-fire (the clock
+    runs a 16th-note tick grid, 4 ticks/beat): 16=bar, 8=half, 4=quarter,
+    2=eighth, 1=sixteenth. Smaller = denser.
+
+    Each State member must have an entry: either a scalar power-of-two tick
+    count, or a two-element [calm, agitated] list of such values (interpolated
+    by bucket fill). Values must be in {1, 2, 4, 8, 16}.
+
+    This section is OPTIONAL. Returns {} if absent — the conductor then skips
+    broadcasting /shrine/cue/refire and the Pd gate falls back to its default
+    grid. When present, every State member must have an entry (a partial
+    section is a config error, matching tempo's strictness).
+    """
+    if "subdiv" not in config:
+        return {}
+
+    subdiv = config["subdiv"]
+    if not isinstance(subdiv, dict):
+        raise ValueError(
+            f"'subdiv' must be a dict, got {type(subdiv).__name__}"
+        )
+
+    known_keys = {s.name.lower() for s in State}
+    for key in subdiv:
+        if key not in known_keys:
+            logger.warning("subdiv: unrecognized key %r (not a State member)", key)
+
+    def _check_value(v, ctx: str) -> None:
+        # bool is an int subclass; reject it explicitly.
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError(f"'subdiv[{ctx}]' must be an integer, got {v!r}")
+        if v not in _ALLOWED_SUBDIV:
+            raise ValueError(
+                f"'subdiv[{ctx}]' must be a power of two in "
+                f"{sorted(_ALLOWED_SUBDIV)}, got {v}"
+            )
+
+    for s in State:
+        key = s.name.lower()
+        if key not in subdiv:
+            raise ValueError(f"'subdiv' is missing entry for state '{key}'")
+
+        val = subdiv[key]
+        if isinstance(val, list):
+            if len(val) != 2:
+                raise ValueError(
+                    f"'subdiv[{key!r}]' must have exactly 2 elements "
+                    f"[calm, agitated], got {len(val)}"
+                )
+            for v in val:
+                _check_value(v, repr(key))
+        else:
+            _check_value(val, repr(key))
+
+    return dict(subdiv)
+
+
 def validate_program_params(config: dict) -> dict[str, dict]:
     """Validate and return the program_params section from a conductor config dict.
 

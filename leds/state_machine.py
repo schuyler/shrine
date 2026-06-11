@@ -5,6 +5,7 @@ no calls to time.time() or time.monotonic() — making this straightforwardly
 unit-testable with accelerated time.
 """
 
+import math
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -86,6 +87,34 @@ class StateMachine:
             lo, hi = val
             return lo + self.bucket_fraction * (hi - lo)
         return float(val)
+
+    def subdiv(self, subdiv_config: dict) -> int:
+        """Compute the melodic re-fire grid (ticks per re-fire) from state + fill.
+
+        The shared clock runs a 16th-note tick grid (4 ticks per beat). This
+        returns how many ticks elapse between re-fires while a contact is held:
+        16=bar, 8=half, 4=quarter, 2=eighth, 1=sixteenth. Smaller means denser,
+        so the pulse tightens as the room comes together — the rhythmic analogue
+        of the modal arc.
+
+        subdiv_config maps state names to either a fixed tick count (scalar) or
+        a [calm, agitated] pair. The pair is interpolated by bucket_fraction in
+        log2 space (so it steps through musical note values, never a fractional
+        grid) and snapped to the nearest power-of-two tick in [1, 16]. Density
+        and tempo ride the same bucket fill, exactly as tempo() does.
+        """
+        name = self._state.name.lower()
+        val = subdiv_config[name]
+        if isinstance(val, list):
+            calm, agitated = val
+            exp = round(
+                math.log2(calm)
+                + self.bucket_fraction * (math.log2(agitated) - math.log2(calm))
+            )
+            ticks = 2 ** exp
+        else:
+            ticks = int(val)
+        return max(1, min(16, ticks))
 
     def tick(self, snapshot: SensorSnapshot, dt: float) -> list[CueEvent]:
         """Advance the FSM by dt seconds given the current sensor snapshot.

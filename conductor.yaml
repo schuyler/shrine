@@ -46,6 +46,21 @@ tempo:
   energizing: [80, 90]
   ascending: 100
 
+# Melodic re-fire grid, in clock ticks per re-fire (clock = 16th-note tick,
+# 4 ticks/beat). Smaller = denser: 16=bar, 8=half, 4=quarter, 2=eighth,
+# 1=sixteenth. A held connection re-advances the walk on this grid; the first
+# note still fires immediately on touch. Like tempo, a scalar is fixed and a
+# [calm, agitated] pair interpolates with bucket fill (calm = empty bucket).
+# The grid tightens as the room comes together, so the texture reads as rhythm
+# rather than scattered chimes. These are STARTING POINTS — tune by ear on the
+# installation. Broadcast on /shrine/cue/refire; omit this section to disable.
+subdiv:
+  quiet: 16          # bar — sparse re-blooms; the attack carries it
+  seeking: [16, 8]   # bar → half as engagement builds
+  aligning: [8, 4]   # half → quarter
+  energizing: [4, 2] # quarter → eighth
+  ascending: 2       # eighth — driving
+
 idle:
   # Global idle bucket: fills while 0 pads engaged, forces Quiet at timeout
   timeout: 180.0

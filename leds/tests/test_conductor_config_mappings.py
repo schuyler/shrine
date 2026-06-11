@@ -19,7 +19,7 @@ from leds.state_machine import State
 # ---------------------------------------------------------------------------
 # These imports will fail (ImportError) until the green phase.
 # ---------------------------------------------------------------------------
-from leds.conductor_config import validate_state_mappings, validate_tempo_config, validate_program_params  # noqa: E402
+from leds.conductor_config import validate_state_mappings, validate_tempo_config, validate_program_params, validate_subdiv_config  # noqa: E402
 from leds.conductor import _get_mappings, _set_mappings, _ConfigReloadHandler  # noqa: E402
 
 
@@ -928,3 +928,108 @@ class TestValidateProgramParams:
         }
         with pytest.raises(ValueError):
             validate_program_params(config)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for validate_subdiv_config
+# ---------------------------------------------------------------------------
+
+def _all_states_subdiv() -> dict:
+    """Return a subdiv dict with a valid entry for every State member."""
+    return {s.name.lower(): 4 for s in State}
+
+
+# ---------------------------------------------------------------------------
+# validate_subdiv_config — optional section
+# ---------------------------------------------------------------------------
+
+class TestValidateSubdivConfigOptional:
+    def test_absent_section_returns_empty(self):
+        # subdiv is optional; absent → {} so the conductor skips the cue.
+        assert validate_subdiv_config({}) == {}
+
+    def test_present_section_returned(self):
+        config = {"subdiv": _all_states_subdiv()}
+        result = validate_subdiv_config(config)
+        for s in State:
+            assert s.name.lower() in result
+
+
+# ---------------------------------------------------------------------------
+# validate_subdiv_config — valid input
+# ---------------------------------------------------------------------------
+
+class TestValidateSubdivConfigValid:
+    def test_scalar_values_accepted(self):
+        config = {"subdiv": _all_states_subdiv()}
+        result = validate_subdiv_config(config)
+        assert isinstance(result, dict)
+
+    def test_calm_agitated_pair_accepted(self):
+        subdiv = _all_states_subdiv()
+        subdiv["seeking"] = [16, 8]
+        config = {"subdiv": subdiv}
+        result = validate_subdiv_config(config)
+        assert result["seeking"] == [16, 8]
+
+    def test_all_powers_of_two_accepted(self):
+        for v in (1, 2, 4, 8, 16):
+            subdiv = {s.name.lower(): v for s in State}
+            assert validate_subdiv_config({"subdiv": subdiv})
+
+    def test_returns_copy_not_original(self):
+        subdiv = _all_states_subdiv()
+        result = validate_subdiv_config({"subdiv": subdiv})
+        assert result is not subdiv
+
+
+# ---------------------------------------------------------------------------
+# validate_subdiv_config — invalid input
+# ---------------------------------------------------------------------------
+
+class TestValidateSubdivConfigInvalid:
+    def test_not_a_dict_raises(self):
+        with pytest.raises(ValueError, match="dict"):
+            validate_subdiv_config({"subdiv": "nope"})
+
+    def test_missing_state_key_raises(self):
+        subdiv = _all_states_subdiv()
+        del subdiv[list(State)[-1].name.lower()]
+        with pytest.raises(ValueError, match="missing"):
+            validate_subdiv_config({"subdiv": subdiv})
+
+    def test_non_power_of_two_raises(self):
+        subdiv = _all_states_subdiv()
+        subdiv["quiet"] = 3
+        with pytest.raises(ValueError, match="power of two"):
+            validate_subdiv_config({"subdiv": subdiv})
+
+    def test_out_of_range_power_raises(self):
+        subdiv = _all_states_subdiv()
+        subdiv["quiet"] = 32
+        with pytest.raises(ValueError, match="power of two"):
+            validate_subdiv_config({"subdiv": subdiv})
+
+    def test_float_value_raises(self):
+        subdiv = _all_states_subdiv()
+        subdiv["quiet"] = 4.0
+        with pytest.raises(ValueError, match="integer"):
+            validate_subdiv_config({"subdiv": subdiv})
+
+    def test_bool_value_raises(self):
+        subdiv = _all_states_subdiv()
+        subdiv["quiet"] = True
+        with pytest.raises(ValueError, match="integer"):
+            validate_subdiv_config({"subdiv": subdiv})
+
+    def test_pair_wrong_length_raises(self):
+        subdiv = _all_states_subdiv()
+        subdiv["seeking"] = [8]
+        with pytest.raises(ValueError, match="2 elements"):
+            validate_subdiv_config({"subdiv": subdiv})
+
+    def test_pair_with_bad_value_raises(self):
+        subdiv = _all_states_subdiv()
+        subdiv["seeking"] = [16, 5]
+        with pytest.raises(ValueError, match="power of two"):
+            validate_subdiv_config({"subdiv": subdiv})

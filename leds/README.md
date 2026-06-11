@@ -136,6 +136,21 @@ tempo:
 
 Tempo is not hot-reloadable; changes require a conductor restart.
 
+#### `subdiv` (optional)
+
+The melodic re-fire grid per state, in clock ticks per re-fire (the Pd clock runs a 16th-note tick, 4 ticks/beat): `16`=bar, `8`=half, `4`=quarter, `2`=eighth, `1`=sixteenth. Smaller = denser. A held connection re-advances the melodic walk on this grid (the first note still fires immediately on touch), so the texture reads as rhythm rather than scattered chimes; the grid tightens as the room comes together. Like `tempo`, a scalar is fixed and a `[calm, agitated]` pair interpolates by bucket fill — in log2 space, snapped to a musical power of two. Values must be in `{1, 2, 4, 8, 16}`.
+
+```yaml
+subdiv:
+  quiet: 16          # bar
+  seeking: [16, 8]   # bar → half
+  aligning: [8, 4]   # half → quarter
+  energizing: [4, 2] # quarter → eighth
+  ascending: 2       # eighth
+```
+
+Broadcast on `/shrine/cue/refire` at ~1 Hz. Omit the whole section to disable (the conductor then sends no `refire` cue and the Pd gate uses its default grid). Like `tempo`, not hot-reloadable.
+
 #### `idle`
 
 Global idle timeout. The idle accumulator fills while zero pads are engaged and drains while any pad is engaged. When it reaches `timeout` from any state, the FSM collapses to Quiet.
@@ -214,6 +229,7 @@ Downward transitions happen when a bucket empties: Aligning → Seeking, Energiz
 | `/shrine/cue/state` | `s` — state name (lowercase) | FSM state transition |
 | `/shrine/cue/group` | `i...` — pad IDs | Group membership change |
 | `/shrine/cue/tempo` | `f` — BPM | Tempo, sent ~1 Hz |
+| `/shrine/cue/refire` | `i` — clock ticks per re-fire | Melodic re-fire grid, sent ~1 Hz (only if `subdiv:` configured) |
 | `/shrine/cue/root` | `i` — MIDI note | Melodic tonic, sent on each Quiet transition |
 
 The conductor also relays raw `/shrine/node/<id>` messages to Pd verbatim.
