@@ -181,3 +181,26 @@ state 4 → ionian (size 7). Requires Pd vanilla only (no ELSE).
   that's why `drone` takes its base frequency on an inlet.
 - **Commas and semicolons in `#X text` comments** must be escaped (`\,` `\;`) or
   Pd parses the tail as a separate message and throws "no method" errors.
+
+## Future work / parked decisions
+
+- **Beat-quantize the melodic voices (not yet implemented — decision parked).**
+  `clock.pd` is now instantiated in `main.pd` and tracks the conductor's tempo
+  (`/shrine/cue/tempo` → `bpm` bus → `clock`), emitting `beat`/`bar`/`beat-ms`.
+  But **nothing consumes those buses yet** — the voices still fire on touch via
+  `cap-trigger` → `note-send`, with no relation to the beat. Whether/how to drive
+  the voices from the clock is an open *feel* decision, best made by ear (Pd isn't
+  in the dev container, so it can't be auditioned there). The two candidate
+  models:
+  - *Beat-driven repetition* — first note fires immediately on touch (no added
+    latency); a held touch re-advances/re-fires on each `r beat`, i.e. an on-grid
+    arpeggio/pulse. Keeps responsiveness, adds rhythmic life. Wiring: gate the
+    `note-send` advance bang with `r beat` while the gate is held.
+  - *Onset quantization* — touch *arms* a note that plays on the next `r beat`.
+    Strictly on-grid but adds up to ~0.6–1.0 s latency at 50–100 BPM; suits an
+    ambient "bloom on the beat" aesthetic, not snappy response. Wiring: a
+    sample-and-hold that releases the pending pitch+velocity on the next beat.
+  - **Before building either,** verify on hardware that Pd's `beat-ms`/`beat`
+    actually lock to the broadcast BPM (watch it shift as the FSM escalates
+    50→100). A lower-risk first consumer (a pulse texture, or LED-only) can
+    confirm the lock before touching the expressive voice path.
