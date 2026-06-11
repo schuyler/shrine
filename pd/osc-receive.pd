@@ -52,7 +52,7 @@
 #X obj 690 690 s gsr-mag-5;
 #X text 470 160 Conductor cue stream (same osc.receive bind):;
 #X obj 480 190 else/osc.route /shrine/cue;
-#X obj 480 240 else/osc.route /state /group root tempo;
+#X obj 480 240 else/osc.route /state /group root tempo refire;
 #X obj 480 290 route quiet seeking aligning energizing ascending;
 #X msg 480 345 0;
 #X msg 525 345 1;
@@ -72,6 +72,8 @@
 #X text 470 540 /shrine/cue/root <midi> -> melodic tonic (shrine-root \, default 36);
 #X obj 700 290 s bpm;
 #X text 470 565 /shrine/cue/tempo <bpm> -> clock BPM (bpm bus \, drives clock.pd).;
+#X text 470 590 /shrine/cue/refire <ticks> -> melodic re-fire grid (refire bus \, drives refire.pd).;
+#X obj 760 290 s refire;
 #X connect 7 0 8 0;
 #X connect 8 4 9 0;
 #X connect 9 0 10 0;
@@ -136,3 +138,4 @@
 #X connect 67 0 68 0;
 #X connect 63 0 69 0;
 #X connect 69 0 68 0;
+#X connect 53 4 74 0;

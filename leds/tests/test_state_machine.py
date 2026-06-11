@@ -432,6 +432,68 @@ class TestTempo:
         assert 60 <= bpm <= 70
 
 
+# ---------------------------------------------------------------------------
+# Subdivision (re-fire grid)
+# ---------------------------------------------------------------------------
+
+_SUBDIV_CFG = {
+    "quiet": 16,
+    "seeking": [16, 8],
+    "aligning": [8, 4],
+    "energizing": [4, 2],
+    "ascending": 2,
+}
+
+
+class TestSubdiv:
+    def test_quiet_returns_fixed_grid(self):
+        fsm = _make_fsm()
+        assert fsm.state == State.QUIET
+        assert fsm.subdiv(_SUBDIV_CFG) == 16
+
+    def test_ascending_returns_fixed_grid(self):
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        _tick_for(fsm, _snap(engaged={0, 1}, group_members={0, 1}), 11.0)
+        _tick_for(fsm, _snap(engaged={0, 1, 2}, group_members={0, 1, 2}), 11.0)
+        _tick_for(fsm, _snap(engaged={0, 1, 2, 3}, group_members={0, 1, 2, 3}), 7.0)
+        assert fsm.state == State.ASCENDING
+        assert fsm.subdiv(_SUBDIV_CFG) == 2
+
+    def test_seeking_at_zero_bucket_is_calm_end(self):
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        assert fsm.state == State.SEEKING
+        # bucket ~0 → calm (sparser) end of [16, 8]
+        assert fsm.subdiv(_SUBDIV_CFG) == 16
+
+    def test_seeking_at_full_bucket_is_agitated_end(self):
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        _tick_for(fsm, _snap(engaged={0}), 10.0)
+        assert fsm.state == State.SEEKING
+        # bucket full → agitated (denser) end of [16, 8]
+        assert fsm.subdiv(_SUBDIV_CFG) == 8
+
+    def test_result_is_always_power_of_two(self):
+        # Mid-bucket must snap to a musical value, never an off-grid count.
+        fsm = _make_fsm()
+        fsm.tick(_snap(engaged={0}), 0.1)
+        _tick_for(fsm, _snap(engaged={0}), 5.0)  # ~50% fill
+        assert fsm.state == State.SEEKING
+        assert fsm.subdiv(_SUBDIV_CFG) in {1, 2, 4, 8, 16}
+
+    def test_density_rises_with_state(self):
+        # Across the arc the grid is monotonically non-increasing (denser).
+        fsm = _make_fsm()
+        quiet = fsm.subdiv(_SUBDIV_CFG)
+        fsm.tick(_snap(engaged={0}), 0.1)
+        seeking = fsm.subdiv(_SUBDIV_CFG)
+        _tick_for(fsm, _snap(engaged={0, 1}, group_members={0, 1}), 11.0)
+        aligning = fsm.subdiv(_SUBDIV_CFG)
+        assert quiet >= seeking >= aligning
+
+
 class TestBucketFraction:
     def test_quiet_fraction_is_zero(self):
         fsm = _make_fsm()

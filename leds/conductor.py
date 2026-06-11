@@ -21,6 +21,7 @@ from leds.conductor_config import (
     load_conductor_config,
     validate_program_params,
     validate_state_mappings,
+    validate_subdiv_config,
     validate_tempo_config,
 )
 from leds.program_config import set_program_params
@@ -245,6 +246,9 @@ def main() -> None:
     # Tempo config is validated at startup (fatal) but NOT hot-reloaded.
     # Editing the tempo section in conductor.yaml requires a restart.
     tempo_cfg = validate_tempo_config(config)
+    # Optional: melodic re-fire grid per state. Empty dict = section absent;
+    # we then skip the /shrine/cue/refire broadcast and Pd uses its default.
+    subdiv_cfg = validate_subdiv_config(config)
     last_tempo_send = 0.0
 
     tick_interval = 1.0 / args.tick_rate
@@ -295,6 +299,12 @@ def main() -> None:
                 bpm = fsm.tempo(tempo_cfg)
                 led_client.send_message("/leds/tempo", bpm)
                 pd_client.send_message("/shrine/cue/tempo", bpm)
+                # Re-fire grid rides the same cadence as tempo. Sent unconditionally
+                # (like tempo) so a Pd restart re-syncs within ~1 s.
+                if subdiv_cfg:
+                    pd_client.send_message(
+                        "/shrine/cue/refire", fsm.subdiv(subdiv_cfg)
+                    )
                 last_tempo_send = now
 
             # Relay continuous cap presence to LED stack.

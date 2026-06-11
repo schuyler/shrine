@@ -81,10 +81,19 @@ two patches binding 57120 would contend, not both receive). It publishes:
   to quiet.
 - `bpm` (float) — the global tempo, from `/shrine/cue/tempo <bpm>`. The
   conductor sends it at ~1 Hz (50–100 BPM, derived from FSM state + bucket
-  fill). `main.pd` feeds `[r bpm]` into `clock.pd`, so Pd's `beat`/`bar`/
+  fill). `main.pd` feeds `[r bpm]` into `clock.pd`, so Pd's `tick`/`beat`/`bar`/
   `beat-ms` pulse **follows the conductor's tempo** rather than free-running at
   its 60 BPM default. The conductor is the tempo master; Pd's clock is a
   follower.
+- `refire` (int) — the melodic re-fire grid, in `clock` **ticks per re-fire**,
+  from `/shrine/cue/refire <ticks>`. The clock runs a 16th-note tick (4
+  ticks/beat), so 16=bar, 8=half, 4=quarter, 2=eighth, 1=sixteenth. The
+  conductor derives it from FSM state + bucket fill (see `conductor.yaml`'s
+  `subdiv:` section) and sends it alongside tempo (~1 Hz). Smaller = denser:
+  the grid tightens as the room comes together, so held contact reads as
+  rhythm rather than scattered chimes. Consumed by `refire.pd`. Sent only if
+  the `subdiv:` section is present; otherwise `refire.pd` falls back to its
+  default quarter-note grid.
 
 ## Files
 
@@ -93,7 +102,8 @@ two patches binding 57120 would contend, not both receive). It publishes:
 | `osc-receive.pd` | OSC in → `cap-*` / `gsr-mag-*` buses + conductor `shrine-state` / `shrine-group` |
 | `drone.pd` | additive presence drone (inlet0 cap, inlet1 base Hz) |
 | `master.pd` | per-channel soft-limit → `dac~ 1-4` |
-| `clock.pd` | global pulse: `beat`, `bar`, `beat-ms`; inlet = BPM, driven by `[r bpm]` from `/shrine/cue/tempo` (60 BPM default until first cue) |
+| `clock.pd` | global pulse: `tick` (16th), `beat`, `bar`, `tickcount` (0–15), `beat-ms`; inlet = BPM, driven by `[r bpm]` from `/shrine/cue/tempo` (60 BPM default until first cue). One 16th-note metro; beat/bar/tickcount are integer divisions of it (no phase drift) |
+| `refire.pd` | beat-driven re-fire gate. Inlet 0 = gate (1/0 from `cap-trigger`), inlet 1 = phase (ticks, cold). Outlet 0 = advance bang: fires immediately on touch, then on each grid position (`r tickcount mod r refire == phase`) while held. Drives a `melodic-voice` advance |
 | `state-table.pd` | maps `shrine-state` int (0–4) → mode symbol on `s scene-mode`; arc: quiet/seeking → major-penta, aligning → dorian, energizing → mixolydian-b6, ascending → ionian |
 | `mode-table.pd` | routes `scene-mode` symbol → writes `mode-intervals` array + `mode-size` + `mode-changed`; handles 9 modes including `mixolydian-b6` |
 | `restless.pd` | fluctuation proxy 0–1 (derived from cap or gsr-mag, replaces absent gsr-stdev) |
@@ -104,6 +114,8 @@ two patches binding 57120 would contend, not both receive). It publishes:
 | `texture-test.pd` | per-voice instruments (each embeds its own `[else/sfont~]` + FX), driven by a `Note` inlet expecting `pitch velocity` pairs |
 | `test/modetest.pd` | headless test: sequences shrine-state 0–4, prints STATE-MODE / MODE-SIZE / INTERVAL-0..6 for each state |
 | `test/run_modetest.py` | Python driver for `modetest.pd`; parses Pd stderr and checks mode symbols, sizes, and intervals against the design arc |
+| `test/refiretest.pd` | headless test: drives `refire.pd` from a fake clock (quarter grid), touch→hold→release; prints ADVANCE per re-fire + MARK RELEASED |
+| `test/run_refiretest.py` | Python driver for `refiretest.pd`; asserts ≥2 advances while held and none after release |
 
 ## Running
 
@@ -170,6 +182,17 @@ Expected: state 0–1 → major-penta (size 5), state 2 → dorian (size 7),
 state 3 → mixolydian-b6 (size 7, intervals 0 2 4 5 7 8 10),
 state 4 → ionian (size 7). Requires Pd vanilla only (no ELSE).
 
+Re-fire gate (`refire.pd`) — drives the gate from a fake clock (quarter-note
+grid), touches and holds, then releases; checks that re-fires land while held
+and stop after release:
+
+```bash
+uv run python pd/test/run_refiretest.py
+```
+
+Expected: ≥2 `ADVANCE` lines while held, 0 after `MARK: RELEASED`. Requires Pd
+vanilla only (no ELSE).
+
 ## Gotchas discovered (worth knowing before editing)
 
 - **`[oscparse]` splits the address** into separate symbols (`shrine node 0 …`),
@@ -182,25 +205,52 @@ state 4 → ionian (size 7). Requires Pd vanilla only (no ELSE).
 - **Commas and semicolons in `#X text` comments** must be escaped (`\,` `\;`) or
   Pd parses the tail as a separate message and throws "no method" errors.
 
-## Future work / parked decisions
+## Beat-driven re-fire (quantization)
 
-- **Beat-quantize the melodic voices (not yet implemented — decision parked).**
-  `clock.pd` is now instantiated in `main.pd` and tracks the conductor's tempo
-  (`/shrine/cue/tempo` → `bpm` bus → `clock`), emitting `beat`/`bar`/`beat-ms`.
-  But **nothing consumes those buses yet** — the voices still fire on touch via
-  `cap-trigger` → `note-send`, with no relation to the beat. Whether/how to drive
-  the voices from the clock is an open *feel* decision, best made by ear (Pd isn't
-  in the dev container, so it can't be auditioned there). The two candidate
-  models:
-  - *Beat-driven repetition* — first note fires immediately on touch (no added
-    latency); a held touch re-advances/re-fires on each `r beat`, i.e. an on-grid
-    arpeggio/pulse. Keeps responsiveness, adds rhythmic life. Wiring: gate the
-    `note-send` advance bang with `r beat` while the gate is held.
-  - *Onset quantization* — touch *arms* a note that plays on the next `r beat`.
-    Strictly on-grid but adds up to ~0.6–1.0 s latency at 50–100 BPM; suits an
-    ambient "bloom on the beat" aesthetic, not snappy response. Wiring: a
-    sample-and-hold that releases the pending pitch+velocity on the next beat.
-  - **Before building either,** verify on hardware that Pd's `beat-ms`/`beat`
-    actually lock to the broadcast BPM (watch it shift as the FSM escalates
-    50→100). A lower-risk first consumer (a pulse texture, or LED-only) can
-    confirm the lock before touching the expressive voice path.
+**Decision (settled): beat-driven repetition, ramped by runtime state.** The
+goal is music, not wind chimes — the difference is *coincidence on a shared grid
+plus repetition*, not latency. So: the first note always fires immediately on
+touch (the attack is the human gesture, never delayed), and a **held** contact
+re-advances the walk on a **shared** grid. Because `melodic-voice` walks on each
+advance, an on-grid re-fire is an arpeggio, not a repeated pitch; because all
+voices reference the same `clock`, they coincide and read as rhythm.
+
+Quantization is part of the modal arc, not a global switch: the grid **tightens
+as the room comes together**, mirroring the harmonic escalation. When the room
+is sparse (quiet/seeking) the grid is loose and the texture breathes; as the FSM
+climbs to energizing/ascending it snaps to a driving pulse. The held connection
+*is* the rhythm — the longer two people stay coupled, the more they lock in.
+
+### What's built
+
+- **`clock.pd`** — one 16th-note `tick` metro; `beat`/`bar`/`tickcount` (0–15)
+  are integer divisions of it (no phase drift). Driven by `[r bpm]`.
+- **`refire.pd`** — the gate. Immediate bang on touch; while held, bangs when
+  `tickcount mod refire == phase`. `refire` (ticks per re-fire) comes from the
+  conductor; per-voice `phase` (cold inlet) staggers voices so a dense grid
+  interlocks instead of stacking into a block chord.
+- **Conductor side** (`leds/state_machine.py` `subdiv()`, `conductor.yaml`
+  `subdiv:`, `conductor_config.validate_subdiv_config`) — derives the grid from
+  state + bucket fill and broadcasts `/shrine/cue/refire`, on the same ~1 Hz
+  cadence as tempo. Scalar = fixed; `[calm, agitated]` interpolates with bucket
+  fill in log2 space (snapped to a musical power-of-two). Curve is a **starting
+  point — tune by ear.** Fully unit-tested (`leds/tests`).
+- **`osc-receive.pd`** routes `/shrine/cue/refire` → `s refire`.
+- **`pd/test/refiretest.pd` + `run_refiretest.py`** — headless check of the gate.
+
+### Remaining step (do on corazon, where Pd runs and it can be auditioned)
+
+`main.pd` is GUI-edited on corazon and excluded from deploy, so the final
+wiring lives there:
+
+1. Instantiate `[clock]` (already feeding `[r bpm]`) and one `[refire]` per
+   melodic voice.
+2. Wire each voice: `cap-trigger` gate (outlet 0) → `refire` inlet 0;
+   `refire` outlet 0 → `melodic-voice` advance inlet (inlet 0); `cap-trigger`
+   intensity (outlet 1) → `melodic-voice` velocity (inlet 1).
+3. Give each `refire` a distinct `phase` (inlet 1) — e.g. 0, 1, 2, 3 ticks —
+   so the voices interlock rather than hit in unison.
+4. **Verify tempo lock first:** watch `clock`'s `tick`/`beat` actually track
+   the broadcast BPM as the FSM escalates 50→100 before trusting the feel.
+5. Tune the `subdiv:` curve (and optionally add per-voice swing / a
+   `restless.pd`-driven push toward a finer grid) by ear.
