@@ -36,6 +36,31 @@ The excitation frequency is computed at boot as `f_exc = k * fs / N`, where
 but the carriers stay locked to their bins, which is what the demodulator cares
 about.)
 
+## Alternate comb — higher band (fallback)
+
+If `181/23` still gets hit (e.g. the interferer is broad in the low band), this
+fallback pushes the whole comb up toward the cleaner high end of the spectrum,
+still using odd/non-round values:
+
+| Key | Value |
+|-----|-------|
+| `base_k` | **290** |
+| `step_k` | **31** |
+| `window_n` | 1800 |
+
+| Node | bin `k` | f_exc (approx) |
+|------|---------|----------------|
+| 0    | 290 | 29.0 kHz |
+| 1    | 321 | 32.1 kHz |
+| 2    | 352 | 35.2 kHz |
+| 3    | 383 | 38.3 kHz |
+
+To use it, set those three keys in each `nodeN.csv` instead of the `181/23`
+values (everything else stays the same). **Caveat:** the TLV2372 charge-amp
+front end is tuned around 18–24 kHz, so verify you still have usable carrier
+magnitude up here before committing — push only as high as the front-end
+response and your survey support. All bins stay well below Nyquist (bin 900).
+
 ## How to pick a different comb
 
 1. **Survey first.** With the LEDs driven at worst case, plot each node's live
