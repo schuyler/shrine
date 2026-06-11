@@ -166,7 +166,10 @@
 #X obj 650 530 melodic-voice 2;
 #X obj 1000 430 state-table;
 #X obj 1000 470 mode-table;
+#X obj 1180 430 r bpm;
+#X obj 1180 470 clock;
 #X connect 24 0 25 0;
+#X connect 37 0 38 0;
 #X connect 1 0 26 0;
 #X connect 2 0 27 0;
 #X connect 16 0 28 0;

@@ -79,6 +79,12 @@ two patches binding 57120 would contend, not both receive). It publishes:
   in a defined key. Send e.g. `/shrine/cue/root 48` to move the whole piece up a
   fourth live. The conductor picks a fresh pentatonic tonic on each transition
   to quiet.
+- `bpm` (float) — the global tempo, from `/shrine/cue/tempo <bpm>`. The
+  conductor sends it at ~1 Hz (50–100 BPM, derived from FSM state + bucket
+  fill). `main.pd` feeds `[r bpm]` into `clock.pd`, so Pd's `beat`/`bar`/
+  `beat-ms` pulse **follows the conductor's tempo** rather than free-running at
+  its 60 BPM default. The conductor is the tempo master; Pd's clock is a
+  follower.
 
 ## Files
 
@@ -87,7 +93,7 @@ two patches binding 57120 would contend, not both receive). It publishes:
 | `osc-receive.pd` | OSC in → `cap-*` / `gsr-mag-*` buses + conductor `shrine-state` / `shrine-group` |
 | `drone.pd` | additive presence drone (inlet0 cap, inlet1 base Hz) |
 | `master.pd` | per-channel soft-limit → `dac~ 1-4` |
-| `clock.pd` | global pulse: `beat`, `bar`, `beat-ms` (default 60 BPM) |
+| `clock.pd` | global pulse: `beat`, `bar`, `beat-ms`; inlet = BPM, driven by `[r bpm]` from `/shrine/cue/tempo` (60 BPM default until first cue) |
 | `state-table.pd` | maps `shrine-state` int (0–4) → mode symbol on `s scene-mode`; arc: quiet/seeking → major-penta, aligning → dorian, energizing → mixolydian-b6, ascending → ionian |
 | `mode-table.pd` | routes `scene-mode` symbol → writes `mode-intervals` array + `mode-size` + `mode-changed`; handles 9 modes including `mixolydian-b6` |
 | `restless.pd` | fluctuation proxy 0–1 (derived from cap or gsr-mag, replaces absent gsr-stdev) |
