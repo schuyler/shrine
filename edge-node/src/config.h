@@ -73,7 +73,7 @@ typedef struct {
     uint16_t ceil_gsr0;     /* calibration ceiling (NVS optional, default 65535 = unconfigured) */
     uint16_t ceil_gsr1;     /* calibration ceiling (NVS optional, default 65535 = unconfigured) */
     uint16_t ceil_gsr2;     /* calibration ceiling (NVS optional, default 65535 = unconfigured) */
-    uint16_t osc_report_ms; /* OSC report interval (NVS optional, default 100 = 10 Hz) */
+    uint16_t osc_report_ms; /* OSC report interval (NVS optional, default 50 = 20 Hz) */
 } node_config_t;
 
 typedef struct {

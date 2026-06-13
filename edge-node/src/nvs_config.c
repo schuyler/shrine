@@ -170,7 +170,7 @@ esp_err_t nvs_config_load(node_config_t *config)
         goto done;
     }
 
-    /* osc_report_ms (optional — defaults to OSC_REPORT_MS_DEFAULT = 100 = 10 Hz) */
+    /* osc_report_ms (optional — defaults to OSC_REPORT_MS_DEFAULT = 50 = 20 Hz) */
     config->osc_report_ms = OSC_REPORT_MS_DEFAULT;
     err = nvs_get_u16(handle, "osc_report_ms", &config->osc_report_ms);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
