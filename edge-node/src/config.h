@@ -37,6 +37,9 @@
 #define CAL_FLOOR_DEFAULT       0   /* no floor subtraction */
 #define CAL_CEIL_DEFAULT    65535   /* sentinel: channel unconfigured */
 
+/* OSC report rate decimation */
+#define OSC_REPORT_MS_DEFAULT 100   /* 10 Hz report rate */
+
 /* ---------------------------------------------------------------------------
  * Task configuration
  * -------------------------------------------------------------------------*/
@@ -47,7 +50,7 @@
 #define NETWORK_TASK_CORE     0
 #define NETWORK_TASK_PRIO     5
 #define NETWORK_TASK_STACK 8192
-#define RESULT_QUEUE_DEPTH    4
+#define RESULT_QUEUE_DEPTH    40
 
 /* ---------------------------------------------------------------------------
  * Data structures
@@ -70,6 +73,7 @@ typedef struct {
     uint16_t ceil_gsr0;     /* calibration ceiling (NVS optional, default 65535 = unconfigured) */
     uint16_t ceil_gsr1;     /* calibration ceiling (NVS optional, default 65535 = unconfigured) */
     uint16_t ceil_gsr2;     /* calibration ceiling (NVS optional, default 65535 = unconfigured) */
+    uint16_t osc_report_ms; /* OSC report interval (NVS optional, default 100 = 10 Hz) */
 } node_config_t;
 
 typedef struct {

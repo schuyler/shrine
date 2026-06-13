@@ -170,9 +170,24 @@ esp_err_t nvs_config_load(node_config_t *config)
         goto done;
     }
 
-    ESP_LOGI(TAG, "config loaded: node_id=%u base_k=%u step_k=%u window_n=%u ssid=%s osc=%s:%u",
+    /* osc_report_ms (optional — defaults to OSC_REPORT_MS_DEFAULT = 100 = 10 Hz) */
+    config->osc_report_ms = OSC_REPORT_MS_DEFAULT;
+    err = nvs_get_u16(handle, "osc_report_ms", &config->osc_report_ms);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK;
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "read osc_report_ms: %s", esp_err_to_name(err));
+        goto done;
+    }
+    if (config->osc_report_ms == 0) {
+        ESP_LOGW(TAG, "osc_report_ms=0 invalid, using default %u",
+                 OSC_REPORT_MS_DEFAULT);
+        config->osc_report_ms = OSC_REPORT_MS_DEFAULT;
+    }
+
+    ESP_LOGI(TAG, "config loaded: node_id=%u base_k=%u step_k=%u window_n=%u ssid=%s osc=%s:%u report_ms=%u",
              config->node_id, config->base_k, config->step_k, config->window_n,
-             config->wifi_ssid, config->osc_host, config->osc_port);
+             config->wifi_ssid, config->osc_host, config->osc_port, config->osc_report_ms);
     ESP_LOGI(TAG, "cal floors: stdev=%u gsr=[%u, %u, %u]",
              config->floor_stdev, config->floor_gsr0,
              config->floor_gsr1, config->floor_gsr2);

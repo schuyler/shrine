@@ -154,8 +154,11 @@ esp_err_t wifi_init(const node_config_t *cfg)
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &s_wifi_cfg), TAG,
                         "esp_wifi_set_config");
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "esp_wifi_start");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_ps(WIFI_PS_NONE), TAG,
+                        "esp_wifi_set_ps");
 
-    ESP_LOGI(TAG, "WiFi STA started, connecting to SSID: %s", cfg->wifi_ssid);
+    ESP_LOGI(TAG, "WiFi STA started (power save off), connecting to SSID: %s",
+             cfg->wifi_ssid);
     ESP_RETURN_ON_ERROR(esp_wifi_connect(), TAG, "esp_wifi_connect");
 
     return ESP_OK;
@@ -261,20 +264,63 @@ void network_task(void *param)
     cal_state_t cal;
     calibration_init(&cal, cfg);
 
-    /* --- Main loop ----------------------------------------------------- */
+    /* --- Main loop: time-gated accumulation ----------------------------- */
     scan_result_t result;
     float cal_values[CAL_NUM_CHANNELS];
     float carrier_mag;
-    while (1) {
-        if (xQueueReceive(g_result_queue, &result, portMAX_DELAY) == pdTRUE) {
-            calibration_apply(&cal, &result, cal_values, &carrier_mag);
-            send_osc(sock, &dest, cfg, cal_values, carrier_mag);
 
-            /* Send FFT spectrum if ready (every ~5s from sensing task) */
+    /* Accumulation state for report-rate decimation. */
+    TickType_t last_send = xTaskGetTickCount();
+    TickType_t interval  = pdMS_TO_TICKS(cfg->osc_report_ms);
+    float peak_stdev     = 0.0f;
+    float latest_cal[CAL_NUM_CHANNELS];
+    float latest_carrier = 0.0f;
+    bool  have_data      = false;
+
+    memset(latest_cal, 0, sizeof(latest_cal));
+
+    while (1) {
+        /* Drain the queue at full speed — no backpressure. Use a short
+         * timeout so we can check the report timer even when the queue
+         * is temporarily empty. */
+        TickType_t wait = have_data
+            ? 0
+            : pdMS_TO_TICKS(cfg->osc_report_ms);
+
+        if (xQueueReceive(g_result_queue, &result, wait) == pdTRUE) {
+            calibration_apply(&cal, &result, cal_values, &carrier_mag);
+
+            /* Peak-hold on stdev (don't miss touch onsets). */
+            if (cal_values[0] > peak_stdev) {
+                peak_stdev = cal_values[0];
+            }
+
+            /* Latest-value on carrier_mag and GSR magnitudes (slow-changing). */
+            for (int i = 0; i < CAL_NUM_CHANNELS; i++) {
+                latest_cal[i] = cal_values[i];
+            }
+            latest_carrier = carrier_mag;
+            have_data = true;
+        }
+
+        /* Time to send? */
+        TickType_t now = xTaskGetTickCount();
+        if (have_data && (now - last_send) >= interval) {
+            /* Overwrite stdev channel with peak-held value. */
+            latest_cal[0] = peak_stdev;
+
+            send_osc(sock, &dest, cfg, latest_cal, latest_carrier);
+
+            /* Send FFT spectrum if ready (every ~5s from sensing task). */
             if (g_fft_ready) {
                 send_fft_osc(sock, &dest, cfg);
                 g_fft_ready = false;
             }
+
+            /* Reset accumulation state. */
+            peak_stdev = 0.0f;
+            have_data  = false;
+            last_send  = now;
         }
     }
 }
