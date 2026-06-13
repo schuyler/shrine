@@ -85,7 +85,7 @@ class TestDefaultConfig:
 
     def test_default_update_rate_hz_value(self):
         config = load_config()
-        assert config["update_rate_hz"] == 30
+        assert config["update_rate_hz"] == 1
 
     @pytest.mark.parametrize("key", OLD_KEYS)
     def test_old_key_absent(self, key):

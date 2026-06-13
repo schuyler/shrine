@@ -78,19 +78,28 @@ def get_token():
     return tok
 
 
-def http_get(url, token=None, binary=False):
+def http_get(url, token=None, binary=False, total_timeout=120):
     req = urllib.request.Request(url)
     if token:
         req.add_header("Authorization", f"Token {token}")
+    deadline = time.monotonic() + total_timeout
     with urllib.request.urlopen(req, timeout=60) as resp:
-        data = resp.read()
+        chunks = []
+        while True:
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"transfer exceeded {total_timeout}s")
+            chunk = resp.read(64 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        data = b"".join(chunks)
     return data if binary else json.loads(data.decode("utf-8"))
 
 
-def search_page(token, query, page, min_dur):
+def search_page(token, query, page, min_dur, max_dur):
     params = {
         "query": query,
-        "filter": f'license:"Creative Commons 0" channels:2 duration:[{min_dur:g} TO *]',
+        "filter": f'license:"Creative Commons 0" channels:2 duration:[{min_dur:g} TO {max_dur:g}]',
         "sort": SORT,
         "fields": FIELDS,
         "page_size": PAGE_SIZE,
@@ -104,12 +113,13 @@ def is_cc0(license_url):
     return CC0_MARKER in (license_url or "").lower()
 
 
-def acceptable(r, min_dur):
+def acceptable(r, min_dur, max_dur):
     # In-code re-check — never trust the query filter alone.
+    dur = float(r.get("duration") or 0)
     return (
         is_cc0(r.get("license"))
         and r.get("channels") == 2
-        and float(r.get("duration") or 0) >= min_dur
+        and min_dur <= dur <= max_dur
         and r.get("previews", {}).get("preview-hq-ogg")
     )
 
@@ -144,6 +154,8 @@ def main():
                     help="output directory (default ./nature_pack)")
     ap.add_argument("--min-duration", type=float, default=30.0,
                     help="minimum raw seconds (default 30)")
+    ap.add_argument("--max-duration", type=float, default=300.0,
+                    help="maximum raw seconds (default 300)")
     args = ap.parse_args()
 
     if args.per_category < 1:
@@ -164,7 +176,7 @@ def main():
 
         while got < args.per_category and page <= MAX_PAGES:
             try:
-                result = search_page(token, query, page, args.min_duration)
+                result = search_page(token, query, page, args.min_duration, args.max_duration)
             except urllib.error.HTTPError as e:
                 if e.code == 401:
                     die("Freesound returned 401 — token missing or invalid.")
@@ -182,22 +194,23 @@ def main():
                 if got >= args.per_category:
                     break
                 rid = r.get("id")
-                if rid in seen_ids or not acceptable(r, args.min_duration):
+                if rid in seen_ids or not acceptable(r, args.min_duration, args.max_duration):
                     continue
 
                 ogg_url = r["previews"]["preview-hq-ogg"]
                 fname = f"{rid}_{safe_name(r.get('name', ''))}.ogg"
                 dest = os.path.join(cat_dir, fname)
+                dur = float(r.get("duration") or 0)
+                print(f"  {fname}  ({dur:.1f}s) ", end="", flush=True)
                 try:
                     size = download_preview(ogg_url, dest, token)
                 except (urllib.error.HTTPError, urllib.error.URLError) as e:
-                    print(f"  [skip] id {rid}: download failed ({e})")
+                    print(f"[skip: {e}]")
                     continue
 
                 seen_ids.add(rid)
                 got += 1
-                dur = float(r.get("duration") or 0)
-                print(f"  [ok] {fname}  ({dur:.1f}s, {size // 1024} KiB)")
+                print(f"[ok, {size // 1024} KiB]")
                 manifest.append({
                     "id": rid,
                     "category": category,

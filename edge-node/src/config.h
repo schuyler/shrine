@@ -38,7 +38,7 @@
 #define CAL_CEIL_DEFAULT    65535   /* sentinel: channel unconfigured */
 
 /* OSC report rate decimation */
-#define OSC_REPORT_MS_DEFAULT 100   /* 10 Hz report rate */
+#define OSC_REPORT_MS_DEFAULT  50   /* 20 Hz report rate */
 
 /* ---------------------------------------------------------------------------
  * Task configuration

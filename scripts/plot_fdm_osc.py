@@ -137,7 +137,7 @@ def _trim(ts_dq, val_dq, t_cutoff):
 def main():
     parser = argparse.ArgumentParser(description="Real-time OSC plotter for 4-node FDM system.")
     parser.add_argument("--host", default="0.0.0.0", help="OSC listen address (default: 0.0.0.0)")
-    parser.add_argument("--port", type=int, default=9001, help="OSC listen port (default: 9001)")
+    parser.add_argument("--port", type=int, default=9002, help="OSC listen port (default: 9002, raw relay)")
     args = parser.parse_args()
 
     # --- OSC server ---

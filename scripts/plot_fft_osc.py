@@ -5,7 +5,7 @@ Real-time FFT spectrum viewer for FDM diagnostic data.
 Receives /shrine/node/{0-3}/fft OSC messages, each carrying a 1024-byte
 blob of u8 log-magnitudes (0 = noise floor, 255 = full scale over 96 dB).
 
-X-axis: frequency in Hz (bin index × sample_rate / FFT_N).
+X-axis: frequency in Hz (bucket center frequency).
 Y-axis: dB (u8 → 0..96 dB mapping).
 Vertical lines mark auto-detected carrier peaks per node.
 
@@ -13,6 +13,7 @@ Usage:
     python scripts/plot_fft_osc.py
     python scripts/plot_fft_osc.py --port 9000
     python scripts/plot_fft_osc.py --sample-rate 180000
+    python scripts/plot_fft_osc.py --bucket-width 2000
 
 Requires: pip install pythonosc matplotlib numpy
 """
@@ -32,16 +33,13 @@ FFT_BINS = FFT_N // 2  # 1024
 DB_RANGE = 96.0
 NUM_NODES = 4
 DEFAULT_SAMPLE_RATE = 180000
+DEFAULT_BUCKET_WIDTH_HZ = 1000
 
 # Ignore bins below this frequency when searching for carrier peaks,
 # to avoid locking onto DC offset or low-frequency noise.
 PEAK_MIN_HZ = 5000
 
-CARRIER_COLORS = ["#e6194b", "#3cb44b", "#4363d8", "#f58231"]
-SPECTRUM_COLOR = "#333333"
-
-SMOOTH_KERNEL_SIZE = 15
-DECIMATE_STRIDE = 4
+NODE_COLORS = ["#e6194b", "#3cb44b", "#4363d8", "#f58231"]
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +86,21 @@ def _find_carrier_peak(spectrum_db, freqs, min_hz):
     return freqs[peak_bin]
 
 
+def _bucket_spectrum(spectrum_db, freqs, bucket_edges):
+    """Average spectrum dB values into frequency buckets.
+
+    Returns an array of length len(bucket_edges) - 1 with the mean dB
+    in each bucket.
+    """
+    n_buckets = len(bucket_edges) - 1
+    bucketed = np.zeros(n_buckets, dtype=np.float32)
+    for i in range(n_buckets):
+        mask = (freqs >= bucket_edges[i]) & (freqs < bucket_edges[i + 1])
+        if np.any(mask):
+            bucketed[i] = np.mean(spectrum_db[mask])
+    return bucketed
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -101,7 +114,7 @@ def main():
         "--host", default="0.0.0.0", help="OSC listen address (default: 0.0.0.0)"
     )
     parser.add_argument(
-        "--port", type=int, default=9001, help="OSC listen port (default: 9001)"
+        "--port", type=int, default=9002, help="OSC listen port (default: 9002, raw relay)"
     )
     parser.add_argument(
         "--sample-rate",
@@ -109,12 +122,24 @@ def main():
         default=DEFAULT_SAMPLE_RATE,
         help=f"ADC sample rate in Hz (default: {DEFAULT_SAMPLE_RATE})",
     )
+    parser.add_argument(
+        "--bucket-width",
+        type=int,
+        default=DEFAULT_BUCKET_WIDTH_HZ,
+        help=f"Frequency bucket width in Hz (default: {DEFAULT_BUCKET_WIDTH_HZ})",
+    )
     args = parser.parse_args()
 
     # Frequency axis: bin index × (sample_rate / FFT_N)
     freq_resolution = args.sample_rate / FFT_N
     freqs = np.arange(FFT_BINS) * freq_resolution
-    freqs_decimated = freqs[::DECIMATE_STRIDE]
+    max_freq = 60000
+
+    # Bucket edges for the bar chart
+    bucket_edges = np.arange(0, max_freq + args.bucket_width, args.bucket_width)
+    bucket_centers = (bucket_edges[:-1] + bucket_edges[1:]) / 2
+    n_buckets = len(bucket_centers)
+    bar_width = args.bucket_width * 0.85
 
     # --- OSC server ---
     dispatcher = Dispatcher()
@@ -126,6 +151,7 @@ def main():
     osc_thread.start()
     print(f"Listening for FFT spectra on {args.host}:{args.port}")
     print(f"Frequency resolution: {freq_resolution:.1f} Hz/bin")
+    print(f"Bucket width: {args.bucket_width} Hz ({n_buckets} buckets)")
     print("Carrier markers: auto-detected from spectrum peaks")
 
     # --- Figure layout: 2×2 grid, one subplot per node ---
@@ -133,52 +159,55 @@ def main():
     fig.suptitle("FDM FFT Spectrum Diagnostic", fontsize=12)
     axes_flat = axes.flatten()
 
-    lines = []
+    bar_containers = []
     carrier_lines = []  # one vline per node, updated each frame
     for node_id, ax in enumerate(axes_flat):
-        ax.set_title(f"Node {node_id}", fontsize=10)
+        color = NODE_COLORS[node_id]
+        ax.set_title(f"Node {node_id}", fontsize=10, color=color)
         ax.set_ylabel("dB")
         ax.set_xlabel("Frequency (Hz)")
         ax.set_ylim(0, DB_RANGE)
-        ax.set_xlim(freqs[0], 60000)
-        ax.grid(True, alpha=0.3)
+        ax.set_xlim(0, max_freq)
+        ax.grid(True, alpha=0.3, axis="y")
 
-        (line,) = ax.plot(
-            freqs_decimated, np.zeros(len(freqs_decimated)),
-            color=SPECTRUM_COLOR, linewidth=1.5, alpha=0.8,
+        bars = ax.bar(
+            bucket_centers, np.zeros(n_buckets),
+            width=bar_width, color=color, alpha=0.7,
         )
-        lines.append(line)
+        bar_containers.append(bars)
 
         # Carrier marker — starts invisible, positioned at 0
         vline = ax.axvline(
-            0, color=CARRIER_COLORS[node_id], linewidth=1.5,
-            linestyle="--", alpha=0.7, visible=False,
+            0, color="black", linewidth=2,
+            linestyle="--", alpha=0.8, visible=False,
         )
         carrier_lines.append(vline)
-
-    def _smooth_and_decimate(spectrum):
-        """Moving-average smooth, then take every stride-th sample."""
-        kernel = np.ones(SMOOTH_KERNEL_SIZE) / SMOOTH_KERNEL_SIZE
-        smoothed = np.convolve(spectrum, kernel, mode="same")
-        return smoothed[::DECIMATE_STRIDE]
 
     def update(_frame):
         with _lock:
             snapshot = dict(_spectra)
 
-        for node_id, line in enumerate(lines):
-            if node_id in snapshot:
-                spectrum = snapshot[node_id]
-                line.set_ydata(_smooth_and_decimate(spectrum))
+        artists = []
+        for node_id in range(NUM_NODES):
+            if node_id not in snapshot:
+                continue
 
-                # Update carrier marker to strongest peak
-                peak_hz = _find_carrier_peak(spectrum, freqs, PEAK_MIN_HZ)
-                if peak_hz is not None:
-                    seg = carrier_lines[node_id].get_paths()[0].vertices
-                    seg[:, 0] = peak_hz
-                    carrier_lines[node_id].set_visible(True)
+            spectrum = snapshot[node_id]
+            bucketed = _bucket_spectrum(spectrum, freqs, bucket_edges)
 
-        return lines + carrier_lines
+            for rect, h in zip(bar_containers[node_id], bucketed):
+                rect.set_height(h)
+
+            # Update carrier marker to strongest peak
+            peak_hz = _find_carrier_peak(spectrum, freqs, PEAK_MIN_HZ)
+            if peak_hz is not None:
+                carrier_lines[node_id].set_xdata([peak_hz, peak_hz])
+                carrier_lines[node_id].set_visible(True)
+
+            artists.extend(bar_containers[node_id])
+            artists.append(carrier_lines[node_id])
+
+        return artists
 
     _ani = animation.FuncAnimation(
         fig, update, interval=200, blit=False, cache_frame_data=False,

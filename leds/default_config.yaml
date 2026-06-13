@@ -1,21 +1,21 @@
 osc_listen_host: "0.0.0.0"
 osc_listen_port: 9000
 wled_targets:
-  - host: "wled-a.local"
+  - host: "10.0.42.20"
     pad: 0
     color: [217, 24, 40]
-  - host: "wled-b.local"
+  - host: "10.0.42.21"
     pad: 1
     color: [2, 136, 166]
-  - host: "wled-c.local"
+  - host: "10.0.42.22"
     pad: 2
     color: [217, 207, 74]
-  - host: "wled-d.local"
+  - host: "10.0.42.23"
     pad: 3
     color: [242, 174, 48]
 wled_port: 80
 wled_timeout: 1.0
-update_rate_hz: 30
+update_rate_hz: 1
 pads: [0, 1, 2, 3]
 default_program: "breathe"
 default_palette: "default"

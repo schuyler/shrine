@@ -18,7 +18,7 @@ def _handler(address, *args):
 def main():
     parser = argparse.ArgumentParser(description="Log incoming OSC messages.")
     parser.add_argument("--host", default="127.0.0.1", help="Listen address")
-    parser.add_argument("--port", type=int, default=9001, help="Listen port")
+    parser.add_argument("--port", type=int, default=9002, help="Listen port (default: 9002, raw relay)")
     args = parser.parse_args()
 
     dispatcher = Dispatcher()

@@ -257,7 +257,7 @@ def main():
     parser.add_argument("--port", help="Serial port (default: auto-detect)")
     parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
     parser.add_argument(
-        "--osc-port", type=int, default=9001, help="UDP listen port for OSC (default: 9001)"
+        "--osc-port", type=int, default=9002, help="UDP listen port for OSC (default: 9002, raw relay)"
     )
     parser.add_argument(
         "--skip-osc", action="store_true", help="Skip OSC validation (for testing without WiFi)"

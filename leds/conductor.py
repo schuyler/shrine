@@ -221,6 +221,7 @@ def _pick_pentatonic_root(
 def _build_shrine_dispatcher(
     sensor_state: SensorState,
     pd_client: SimpleUDPClient | None = None,
+    raw_relay_client: SimpleUDPClient | None = None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
 
@@ -232,6 +233,9 @@ def _build_shrine_dispatcher(
             node_id = int(address.split("/")[-1])
             if 0 <= node_id < 4 and len(args) >= 5:
                 raw = [float(a) for a in args[:5]]
+                # Relay raw (pre-scaling) values for monitoring.
+                if raw_relay_client is not None:
+                    raw_relay_client.send_message(address, raw)
                 scaling_cfg = _get_scaling()
                 scaled = _apply_scaling(scaling_cfg, node_id, *raw)
                 if pd_client is not None:
@@ -264,6 +268,9 @@ def main() -> None:
     parser.add_argument("--led-port", type=int, default=9000)
     parser.add_argument("--pd-host", default="127.0.0.1")
     parser.add_argument("--pd-port", type=int, default=57120)
+    parser.add_argument("--raw-relay-host", default="127.0.0.1")
+    parser.add_argument("--raw-relay-port", type=int, default=9002,
+                        help="Port for raw (pre-scaling) sensor relay")
     parser.add_argument("--tick-rate", type=float, default=30.0,
                         help="Conductor tick rate in Hz")
     parser.add_argument("--log-level", default="INFO",
@@ -327,7 +334,8 @@ def main() -> None:
     observer.daemon = True
     observer.start()
 
-    dispatcher = _build_shrine_dispatcher(sensor_state, pd_client)
+    raw_relay_client = SimpleUDPClient(args.raw_relay_host, args.raw_relay_port)
+    dispatcher = _build_shrine_dispatcher(sensor_state, pd_client, raw_relay_client)
     server = ReusePortOSCUDPServer((args.listen_host, args.listen_port), dispatcher)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
