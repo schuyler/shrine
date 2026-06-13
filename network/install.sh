@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # Install shrine network config files on corazon.
+# Installs dnsmasq config, DHCP host reservations, and /etc/hosts entries.
+# WiFi/ethernet mode is managed separately by shrine-network.sh.
 # Requires root. Idempotent — safe to re-run.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-NM_CONF="/etc/NetworkManager/conf.d/wifi-powersave-off.conf"
 DNSMASQ_CONF="/etc/NetworkManager/dnsmasq-shared.d/shrine-dnsmasq.conf"
 DHCP_HOSTS="/etc/NetworkManager/shrine-dhcp-hosts"
 ETC_HOSTS="/etc/hosts"
 
-MANAGED_TARGETS=("$NM_CONF" "$DNSMASQ_CONF" "$DHCP_HOSTS")
+MANAGED_TARGETS=("$DNSMASQ_CONF" "$DHCP_HOSTS")
 HOSTS_MARKER_BEGIN="# BEGIN shrine"
 HOSTS_MARKER_END="# END shrine"
 
@@ -52,11 +53,9 @@ done
 cp -v "$ETC_HOSTS" "${ETC_HOSTS}.bak"
 
 # --- Ensure target directories exist ---
-mkdir -p "$(dirname "$NM_CONF")"
 mkdir -p "$(dirname "$DNSMASQ_CONF")"
 
-# --- Install NM and dnsmasq config ---
-cp -v "$SCRIPT_DIR/wifi-powersave-off.conf" "$NM_CONF"
+# --- Install dnsmasq and DHCP config ---
 cp -v "$SCRIPT_DIR/shrine-dnsmasq.conf" "$DNSMASQ_CONF"
 cp -v "$SCRIPT_DIR/shrine-dhcp-hosts" "$DHCP_HOSTS"
 
