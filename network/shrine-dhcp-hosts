@@ -1,0 +1,14 @@
+# Static DHCP leases for the shrine installation network.
+# Fill in MAC addresses before running install.sh.
+
+# Edge nodes
+XX:XX:XX:XX:XX:XX,node-0,10.0.42.10
+XX:XX:XX:XX:XX:XX,node-1,10.0.42.11
+XX:XX:XX:XX:XX:XX,node-2,10.0.42.12
+XX:XX:XX:XX:XX:XX,node-3,10.0.42.13
+
+# WLED boxes
+XX:XX:XX:XX:XX:XX,wled-a,10.0.42.20
+XX:XX:XX:XX:XX:XX,wled-b,10.0.42.21
+XX:XX:XX:XX:XX:XX,wled-c,10.0.42.22
+XX:XX:XX:XX:XX:XX,wled-d,10.0.42.23
