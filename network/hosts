@@ -1,0 +1,15 @@
+127.0.0.1	localhost
+255.255.255.255	broadcasthost
+::1             localhost
+
+10.0.42.10 node-0
+10.0.42.11 node-1
+10.0.42.12 node-2
+10.0.42.13 node-3
+
+10.0.42.20 wled-a
+10.0.42.21 wled-b
+10.0.42.22 wled-c
+10.0.42.23 wled-d
+
+
