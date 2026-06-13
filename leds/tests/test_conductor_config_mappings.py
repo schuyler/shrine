@@ -19,7 +19,7 @@ from leds.state_machine import State
 # ---------------------------------------------------------------------------
 # These imports will fail (ImportError) until the green phase.
 # ---------------------------------------------------------------------------
-from leds.conductor_config import validate_state_mappings, validate_tempo_config, validate_program_params, validate_subdiv_config  # noqa: E402
+from leds.conductor_config import validate_state_mappings, validate_tempo_config, validate_program_params, validate_subdiv_config, validate_scaling_config  # noqa: E402
 from leds.conductor import _get_mappings, _set_mappings, _ConfigReloadHandler  # noqa: E402
 
 
@@ -1033,3 +1033,213 @@ class TestValidateSubdivConfigInvalid:
         subdiv["seeking"] = [16, 5]
         with pytest.raises(ValueError, match="power of two"):
             validate_subdiv_config({"subdiv": subdiv})
+
+
+# ---------------------------------------------------------------------------
+# Helpers for validate_scaling_config
+# ---------------------------------------------------------------------------
+
+def _valid_scaling_config() -> dict:
+    """Return a valid scaling section with all 4 nodes."""
+    return {
+        f"node_{i}": {
+            "stdev": {"floor": 0, "ceiling": 200},
+            "gsr": {"floor": 0, "ceiling": 50},
+        }
+        for i in range(4)
+    }
+
+
+# ---------------------------------------------------------------------------
+# validate_scaling_config — optional section
+# ---------------------------------------------------------------------------
+
+class TestValidateScalingConfigOptional:
+    def test_absent_section_returns_empty(self):
+        """scaling is optional; absent → {} means raw passthrough."""
+        assert validate_scaling_config({}) == {}
+
+    def test_present_section_returned(self):
+        config = {"scaling": _valid_scaling_config()}
+        result = validate_scaling_config(config)
+        for i in range(4):
+            assert f"node_{i}" in result
+
+
+# ---------------------------------------------------------------------------
+# validate_scaling_config — valid input
+# ---------------------------------------------------------------------------
+
+class TestValidateScalingConfigValid:
+    def test_valid_config_returns_dict(self):
+        config = {"scaling": _valid_scaling_config()}
+        result = validate_scaling_config(config)
+        assert isinstance(result, dict)
+
+    def test_values_round_trip(self):
+        config = {"scaling": _valid_scaling_config()}
+        result = validate_scaling_config(config)
+        assert result["node_0"]["stdev"]["floor"] == 0
+        assert result["node_0"]["stdev"]["ceiling"] == 200
+        assert result["node_0"]["gsr"]["floor"] == 0
+        assert result["node_0"]["gsr"]["ceiling"] == 50
+
+    def test_float_values_accepted(self):
+        scaling = _valid_scaling_config()
+        scaling["node_0"]["stdev"]["floor"] = 1.5
+        scaling["node_0"]["stdev"]["ceiling"] = 100.5
+        config = {"scaling": scaling}
+        result = validate_scaling_config(config)
+        assert result["node_0"]["stdev"]["floor"] == 1.5
+
+    def test_returns_copy_not_original(self):
+        scaling = _valid_scaling_config()
+        config = {"scaling": scaling}
+        result = validate_scaling_config(config)
+        assert result is not scaling
+
+
+# ---------------------------------------------------------------------------
+# validate_scaling_config — missing nodes
+# ---------------------------------------------------------------------------
+
+class TestValidateScalingConfigMissingNodes:
+    def test_missing_node_raises(self):
+        scaling = _valid_scaling_config()
+        del scaling["node_3"]
+        with pytest.raises(ValueError, match="node_3"):
+            validate_scaling_config({"scaling": scaling})
+
+    def test_missing_all_nodes_raises(self):
+        with pytest.raises(ValueError):
+            validate_scaling_config({"scaling": {}})
+
+
+# ---------------------------------------------------------------------------
+# validate_scaling_config — missing channels
+# ---------------------------------------------------------------------------
+
+class TestValidateScalingConfigMissingChannels:
+    def test_missing_stdev_raises(self):
+        scaling = _valid_scaling_config()
+        del scaling["node_0"]["stdev"]
+        with pytest.raises(ValueError, match="stdev"):
+            validate_scaling_config({"scaling": scaling})
+
+    def test_missing_gsr_raises(self):
+        scaling = _valid_scaling_config()
+        del scaling["node_0"]["gsr"]
+        with pytest.raises(ValueError, match="gsr"):
+            validate_scaling_config({"scaling": scaling})
+
+    def test_missing_floor_raises(self):
+        scaling = _valid_scaling_config()
+        del scaling["node_0"]["stdev"]["floor"]
+        with pytest.raises(ValueError, match="floor"):
+            validate_scaling_config({"scaling": scaling})
+
+    def test_missing_ceiling_raises(self):
+        scaling = _valid_scaling_config()
+        del scaling["node_0"]["stdev"]["ceiling"]
+        with pytest.raises(ValueError, match="ceiling"):
+            validate_scaling_config({"scaling": scaling})
+
+
+# ---------------------------------------------------------------------------
+# validate_scaling_config — bad types
+# ---------------------------------------------------------------------------
+
+class TestValidateScalingConfigBadTypes:
+    def test_scaling_not_a_dict_raises(self):
+        with pytest.raises(ValueError, match="dict"):
+            validate_scaling_config({"scaling": "not a dict"})
+
+    def test_node_not_a_dict_raises(self):
+        scaling = _valid_scaling_config()
+        scaling["node_0"] = "not a dict"
+        with pytest.raises(ValueError):
+            validate_scaling_config({"scaling": scaling})
+
+    def test_channel_not_a_dict_raises(self):
+        scaling = _valid_scaling_config()
+        scaling["node_0"]["stdev"] = 42
+        with pytest.raises(ValueError):
+            validate_scaling_config({"scaling": scaling})
+
+    def test_non_numeric_floor_raises(self):
+        scaling = _valid_scaling_config()
+        scaling["node_0"]["stdev"]["floor"] = "low"
+        with pytest.raises(ValueError, match="numeric"):
+            validate_scaling_config({"scaling": scaling})
+
+    def test_non_numeric_ceiling_raises(self):
+        scaling = _valid_scaling_config()
+        scaling["node_0"]["stdev"]["ceiling"] = "high"
+        with pytest.raises(ValueError, match="numeric"):
+            validate_scaling_config({"scaling": scaling})
+
+    def test_ceiling_equal_to_floor_raises(self):
+        scaling = _valid_scaling_config()
+        scaling["node_0"]["stdev"]["ceiling"] = 0
+        scaling["node_0"]["stdev"]["floor"] = 0
+        with pytest.raises(ValueError, match="ceiling.*floor"):
+            validate_scaling_config({"scaling": scaling})
+
+    def test_ceiling_less_than_floor_raises(self):
+        scaling = _valid_scaling_config()
+        scaling["node_0"]["gsr"]["ceiling"] = 10
+        scaling["node_0"]["gsr"]["floor"] = 20
+        with pytest.raises(ValueError, match="ceiling.*floor"):
+            validate_scaling_config({"scaling": scaling})
+
+
+# ---------------------------------------------------------------------------
+# validate_scaling_config — extra keys
+# ---------------------------------------------------------------------------
+
+class TestValidateScalingConfigExtraKeys:
+    def test_extra_node_key_does_not_raise(self):
+        scaling = _valid_scaling_config()
+        scaling["node_99"] = {"stdev": {"floor": 0, "ceiling": 1}, "gsr": {"floor": 0, "ceiling": 1}}
+        config = {"scaling": scaling}
+        result = validate_scaling_config(config)
+        assert result is not None
+
+    def test_extra_node_key_logs_warning(self, caplog):
+        import logging
+        scaling = _valid_scaling_config()
+        scaling["bogus_node"] = {"stdev": {"floor": 0, "ceiling": 1}, "gsr": {"floor": 0, "ceiling": 1}}
+        config = {"scaling": scaling}
+        with caplog.at_level(logging.WARNING):
+            validate_scaling_config(config)
+        assert "bogus_node" in " ".join(caplog.messages)
+
+    def test_extra_channel_key_logs_warning(self, caplog):
+        import logging
+        scaling = _valid_scaling_config()
+        scaling["node_0"]["typo_channel"] = {"floor": 0, "ceiling": 1}
+        config = {"scaling": scaling}
+        with caplog.at_level(logging.WARNING):
+            validate_scaling_config(config)
+        assert "typo_channel" in " ".join(caplog.messages)
+
+    def test_extra_field_in_channel_logs_warning(self, caplog):
+        import logging
+        scaling = _valid_scaling_config()
+        scaling["node_0"]["stdev"]["extra_field"] = 42
+        config = {"scaling": scaling}
+        with caplog.at_level(logging.WARNING):
+            validate_scaling_config(config)
+        assert "extra_field" in " ".join(caplog.messages)
+
+    def test_bool_floor_raises(self):
+        scaling = _valid_scaling_config()
+        scaling["node_0"]["stdev"]["floor"] = True
+        with pytest.raises(ValueError, match="numeric"):
+            validate_scaling_config({"scaling": scaling})
+
+    def test_bool_ceiling_raises(self):
+        scaling = _valid_scaling_config()
+        scaling["node_0"]["gsr"]["ceiling"] = False
+        with pytest.raises(ValueError, match="numeric"):
+            validate_scaling_config({"scaling": scaling})

@@ -61,6 +61,25 @@ subdiv:
   energizing: [4, 2] # quarter → eighth
   ascending: 2       # eighth — driving
 
+# Per-node floor/ceiling normalization, same formula as firmware calibration_apply:
+# clamp((raw - floor) / (ceiling - floor), 0, 1). Channels with zero range
+# output 0 (unconfigured behavior). This section is optional — omit it for
+# raw passthrough (e.g., when using osc-sim which already sends 0–1).
+# Hot-reloadable: edit values while the conductor runs.
+scaling:
+  node_0:
+    stdev: { floor: 0, ceiling: 200 }
+    gsr: { floor: 0, ceiling: 50 }
+  node_1:
+    stdev: { floor: 0, ceiling: 200 }
+    gsr: { floor: 0, ceiling: 50 }
+  node_2:
+    stdev: { floor: 0, ceiling: 200 }
+    gsr: { floor: 0, ceiling: 50 }
+  node_3:
+    stdev: { floor: 0, ceiling: 200 }
+    gsr: { floor: 0, ceiling: 50 }
+
 idle:
   # Global idle bucket: fills while 0 pads engaged, forces Quiet at timeout
   timeout: 180.0

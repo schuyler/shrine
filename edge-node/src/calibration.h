@@ -6,7 +6,7 @@
 
 /* Set to 0 to disable calibration (pass raw values through) */
 #ifndef CAL_ENABLED
-#define CAL_ENABLED         1
+#define CAL_ENABLED         0
 #endif
 
 /* Number of calibrated channels: self_stdev + gsr_mag[0..2] */

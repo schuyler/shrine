@@ -20,6 +20,7 @@ from watchdog.observers import Observer
 from leds.conductor_config import (
     load_conductor_config,
     validate_program_params,
+    validate_scaling_config,
     validate_state_mappings,
     validate_subdiv_config,
     validate_tempo_config,
@@ -54,6 +55,68 @@ def _set_mappings(programs: dict[str, str], palettes: dict[str, str]) -> None:
     with _mappings_lock:
         _programs = programs
         _palettes = palettes
+
+
+# ---------------------------------------------------------------------------
+# Scaling config (hot-reloadable)
+# ---------------------------------------------------------------------------
+
+_scaling_lock = threading.Lock()
+_scaling: dict = {}
+
+
+def _get_scaling() -> dict:
+    with _scaling_lock:
+        return _scaling
+
+
+def _set_scaling(scaling: dict) -> None:
+    # Replace the module-level reference wholesale, never mutate in place.
+    # Same invariant as _set_mappings: callers of _get_scaling hold a
+    # reference to a dict (and its nested dicts) that will never be modified,
+    # only replaced.
+    global _scaling
+    with _scaling_lock:
+        _scaling = scaling
+
+
+def _apply_scaling(
+    scaling_cfg: dict,
+    node_id: int,
+    stdev: float,
+    carrier_mag: float,
+    gsr0: float,
+    gsr1: float,
+    gsr2: float,
+) -> tuple[float, float, float, float, float]:
+    """Apply floor/ceiling normalization to raw sensor values.
+
+    Formula: clamp((raw - floor) / (ceiling - floor), 0, 1)
+    carrier_mag passes through unchanged (dead weight).
+    If no config or node not in config, all values pass through.
+    """
+    node_key = f"node_{node_id}"
+    if not scaling_cfg or node_key not in scaling_cfg:
+        return (stdev, carrier_mag, gsr0, gsr1, gsr2)
+
+    node_cfg = scaling_cfg[node_key]
+
+    def _scale(raw: float, floor: float, ceiling: float) -> float:
+        span = ceiling - floor
+        if span <= 0:
+            return 0.0
+        return max(0.0, min(1.0, (raw - floor) / span))
+
+    s_cfg = node_cfg["stdev"]
+    g_cfg = node_cfg["gsr"]
+
+    return (
+        _scale(stdev, s_cfg["floor"], s_cfg["ceiling"]),
+        carrier_mag,
+        _scale(gsr0, g_cfg["floor"], g_cfg["ceiling"]),
+        _scale(gsr1, g_cfg["floor"], g_cfg["ceiling"]),
+        _scale(gsr2, g_cfg["floor"], g_cfg["ceiling"]),
+    )
 
 
 class _ConfigReloadHandler(FileSystemEventHandler):
@@ -116,6 +179,16 @@ class _ConfigReloadHandler(FileSystemEventHandler):
                 exc_info=True,
             )
 
+        # Hot-reload scaling config independently.
+        try:
+            new_scaling = validate_scaling_config(raw)
+            _set_scaling(new_scaling)
+        except Exception:
+            logger.warning(
+                "scaling reload failed; keeping previous scaling",
+                exc_info=True,
+            )
+
         # Update debounce timestamp after the entire reload completes.
         # This is reached whenever programs/palettes validation succeeds (including
         # when program_params fails — the try/except falls through). It is NOT
@@ -153,16 +226,21 @@ def _build_shrine_dispatcher(
 
     def node_handler(address: str, *args):
         # /shrine/node/<id>  →  stdev, carrier_mag, gsr0, gsr1, gsr2
-        # Relay the raw sensor stream to Pd so the audio engine and the
-        # conductor share one broadcast without Pd needing SO_REUSEPORT.
-        if pd_client is not None:
-            pd_client.send_message(address, list(args))
+        # Apply scaling (floor/ceiling normalization) then relay scaled
+        # values to Pd and the state machine.
         try:
             node_id = int(address.split("/")[-1])
             if 0 <= node_id < 4 and len(args) >= 5:
-                sensor_state.update_node(node_id, *[float(a) for a in args[:5]])
+                raw = [float(a) for a in args[:5]]
+                scaling_cfg = _get_scaling()
+                scaled = _apply_scaling(scaling_cfg, node_id, *raw)
+                if pd_client is not None:
+                    pd_client.send_message(address, list(scaled))
+                sensor_state.update_node(node_id, *scaled)
             else:
                 logger.debug("Out-of-range/short node message: %s %s", address, args)
+                if pd_client is not None:
+                    pd_client.send_message(address, list(args))
         except (ValueError, IndexError):
             logger.debug("Malformed node message: %s %s", address, args)
 
@@ -214,6 +292,17 @@ def main() -> None:
         set_program_params(validate_program_params(config))
     except Exception:
         logger.warning("Invalid program_params in config; using defaults", exc_info=True)
+
+    # Load initial scaling config (non-fatal if missing/invalid).
+    try:
+        initial_scaling = validate_scaling_config(config)
+        _set_scaling(initial_scaling)
+        if initial_scaling:
+            logger.info("Scaling config loaded for %d nodes", len(initial_scaling))
+        else:
+            logger.info("No scaling config; raw sensor values will pass through")
+    except Exception:
+        logger.warning("Invalid scaling config; raw passthrough", exc_info=True)
 
     sensor_state = SensorState(sensing_cfg)
     fsm = StateMachine(

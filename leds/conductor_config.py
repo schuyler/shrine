@@ -189,6 +189,90 @@ def validate_subdiv_config(config: dict) -> dict:
     return dict(subdiv)
 
 
+_NODE_KEYS = {f"node_{i}" for i in range(4)}
+
+
+def validate_scaling_config(config: dict) -> dict:
+    """Validate and return the scaling section from a conductor config dict.
+
+    Returns {} if the section is absent (optional section — raw passthrough).
+    When present, requires an entry for each of node_0 through node_3, each
+    with stdev: {floor, ceiling} and gsr: {floor, ceiling}.  floor/ceiling
+    must be numeric, ceiling > floor.
+
+    Raises ValueError on structural errors.
+    """
+    if "scaling" not in config:
+        return {}
+
+    raw = config["scaling"]
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"'scaling' must be a dict, got {type(raw).__name__}"
+        )
+
+    # Warn on unrecognized node keys
+    for key in raw:
+        if key not in _NODE_KEYS:
+            logger.warning("scaling: unrecognized key %r (not node_0..node_3)", key)
+
+    # Require all 4 nodes
+    for node_key in sorted(_NODE_KEYS):
+        if node_key not in raw:
+            raise ValueError(f"'scaling' is missing entry for '{node_key}'")
+
+        node_val = raw[node_key]
+        if not isinstance(node_val, dict):
+            raise ValueError(
+                f"'scaling[{node_key!r}]' must be a dict, got {type(node_val).__name__}"
+            )
+
+        for channel in ("stdev", "gsr"):
+            if channel not in node_val:
+                raise ValueError(
+                    f"'scaling[{node_key!r}]' is missing '{channel}'"
+                )
+            ch_val = node_val[channel]
+            if not isinstance(ch_val, dict):
+                raise ValueError(
+                    f"'scaling[{node_key!r}][{channel!r}]' must be a dict, "
+                    f"got {type(ch_val).__name__}"
+                )
+            for field in ("floor", "ceiling"):
+                if field not in ch_val:
+                    raise ValueError(
+                        f"'scaling[{node_key!r}][{channel!r}]' is missing '{field}'"
+                    )
+                val = ch_val[field]
+                if isinstance(val, bool) or not isinstance(val, (int, float)):
+                    raise ValueError(
+                        f"'scaling[{node_key!r}][{channel!r}][{field!r}]' must be numeric, "
+                        f"got {type(val).__name__}"
+                    )
+            # Warn on unrecognized keys within {floor, ceiling} sub-dict
+            for k in ch_val:
+                if k not in ("floor", "ceiling"):
+                    logger.warning(
+                        "scaling[%r][%r]: unrecognized key %r (ignored)",
+                        node_key, channel, k,
+                    )
+            if ch_val["ceiling"] <= ch_val["floor"]:
+                raise ValueError(
+                    f"'scaling[{node_key!r}][{channel!r}]': ceiling must be > floor, "
+                    f"got ceiling={ch_val['ceiling']}, floor={ch_val['floor']}"
+                )
+
+        # Warn on unrecognized keys within node entry
+        for k in node_val:
+            if k not in ("stdev", "gsr"):
+                logger.warning(
+                    "scaling[%r]: unrecognized key %r (ignored)",
+                    node_key, k,
+                )
+
+    return dict(raw)
+
+
 def validate_program_params(config: dict) -> dict[str, dict]:
     """Validate and return the program_params section from a conductor config dict.
 
