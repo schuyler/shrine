@@ -22,7 +22,7 @@
  * FDM window and carrier parameters
  * -------------------------------------------------------------------------*/
 
-#define WINDOW_N_DEFAULT    1800    /* samples per demod window */
+#define WINDOW_N_DEFAULT    9000    /* samples per demod window (~50ms at ~180 ksps) */
 #define BASE_K_DEFAULT       180    /* DFT bin for node 0 */
 #define STEP_K_DEFAULT        20    /* bin spacing between nodes */
 #define NUM_NODES               4

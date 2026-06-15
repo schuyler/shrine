@@ -177,12 +177,13 @@ void sensing_task(void *param)
             for (int i = 0; i < N; i++) sum += (float)s_snapshot_buf[i];
             float fft_mean = sum / (float)N;
 
-            for (int i = 0; i < N; i++) {
+            int fft_fill = (N < FFT_N) ? N : FFT_N;
+            for (int i = 0; i < fft_fill; i++) {
                 s_fft_buf[2*i]     = ((float)s_snapshot_buf[i] - fft_mean) * s_hann[i];
                 s_fft_buf[2*i + 1] = 0.0f;  /* imaginary = 0 */
             }
             /* Zero-pad remaining samples to FFT_N */
-            for (int i = N; i < FFT_N; i++) {
+            for (int i = fft_fill; i < FFT_N; i++) {
                 s_fft_buf[2*i]     = 0.0f;
                 s_fft_buf[2*i + 1] = 0.0f;
             }

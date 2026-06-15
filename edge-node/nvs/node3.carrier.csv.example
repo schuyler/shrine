@@ -6,9 +6,9 @@ wifi_ssid,data,string,your-ssid
 wifi_pass,data,string,your-password
 osc_host,data,string,192.168.4.255
 osc_port,data,u16,9001
-base_k,data,u16,181
-step_k,data,u16,23
-window_n,data,u16,1800
+base_k,data,u16,290
+step_k,data,u16,31
+window_n,data,u16,9000
 floor_stdev,data,u16,0
 floor_gsr0,data,u16,0
 floor_gsr1,data,u16,0
