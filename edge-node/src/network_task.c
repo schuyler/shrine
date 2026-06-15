@@ -12,7 +12,6 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
-#include "mdns.h"
 
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
@@ -34,8 +33,6 @@ static const char *TAG = "network";
 static TimerHandle_t  s_reconnect_timer = NULL;
 static uint32_t       s_backoff_ms      = BACKOFF_INIT_MS;
 static wifi_config_t  s_wifi_cfg;       /* stored at init for reconnect */
-static char      s_mdns_hostname[16];   /* "node-255\0" max 9 chars */
-static uint16_t  s_mdns_osc_port;
 
 static void reconnect_timer_cb(TimerHandle_t timer)
 {
@@ -83,31 +80,6 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         if (s_reconnect_timer != NULL) {
             xTimerStop(s_reconnect_timer, 0);
         }
-
-        /* Register mDNS hostname and OSC service.
-         * mdns_service_remove handles the reconnect case (returns
-         * ESP_ERR_NOT_FOUND harmlessly on first connect). */
-        esp_err_t rm_ret = mdns_service_remove("_osc", "_udp");
-        if (rm_ret != ESP_OK && rm_ret != ESP_ERR_NOT_FOUND) {
-            ESP_LOGW(TAG, "mdns_service_remove unexpected: %s",
-                     esp_err_to_name(rm_ret));
-        }
-
-        esp_err_t h_ret = mdns_hostname_set(s_mdns_hostname);
-        if (h_ret != ESP_OK) {
-            ESP_LOGW(TAG, "mdns_hostname_set failed: %s",
-                     esp_err_to_name(h_ret));
-        }
-
-        esp_err_t s_ret = mdns_service_add(NULL, "_osc", "_udp",
-                                           s_mdns_osc_port, NULL, 0);
-        if (s_ret != ESP_OK) {
-            ESP_LOGW(TAG, "mdns_service_add failed: %s",
-                     esp_err_to_name(s_ret));
-        }
-
-        ESP_LOGI(TAG, "mDNS: %s.local _osc._udp port %u",
-                 s_mdns_hostname, s_mdns_osc_port);
     }
 }
 
@@ -122,13 +94,6 @@ esp_err_t wifi_init(const node_config_t *cfg)
                         "esp_event_loop_create_default");
 
     esp_netif_create_default_wifi_sta();
-
-    /* mDNS — store config for event handler, init the stack. */
-    snprintf(s_mdns_hostname, sizeof(s_mdns_hostname),
-             "node-%u", cfg->node_id);
-    s_mdns_osc_port = cfg->osc_port;
-
-    ESP_RETURN_ON_ERROR(mdns_init(), TAG, "mdns_init");
 
     wifi_init_config_t wifi_init_cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&wifi_init_cfg), TAG, "esp_wifi_init");
